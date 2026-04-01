@@ -7,11 +7,11 @@ echo.
 
 :: 1. Text Backend (port 8000)
 echo [1/3] Starting Text Backend (port 8000)...
-start "DeepCoke Text Backend" cmd /k "cd /d %~dp0src\LLM_back && python -m uvicorn test:app --host 0.0.0.0 --port 8000 --reload"
+start "DeepCoke Text Backend" cmd /k "cd /d %~dp0src\LLM_back && call conda activate deepcoke && python -m uvicorn test:app --host 0.0.0.0 --port 8000 --reload"
 
 :: 2. Voice Backend (port 8001)
 echo [2/3] Starting Voice Backend (port 8001)...
-start "DeepCoke Voice Backend" cmd /k "cd /d %~dp0voice_agent_backend && call .venv\Scripts\activate && uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
+start "DeepCoke Voice Backend" cmd /k "cd /d %~dp0voice_agent_backend && call conda activate deepcoke && python -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload"
 
 :: 3. Frontend (port 8080)
 echo [3/3] Starting Frontend (port 8080)...
