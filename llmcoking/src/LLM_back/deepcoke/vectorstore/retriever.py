@@ -19,6 +19,11 @@ class RetrievedChunk:
     keywords: str
     score: float  # cosine similarity (higher = more similar)
     chunk_index: int
+    journal: str = ""
+    volume: str = ""
+    issue: str = ""
+    pages: str = ""
+    doi: str = ""
 
 
 def retrieve(
@@ -70,6 +75,11 @@ def retrieve(
             keywords=meta.get("keywords", ""),
             score=similarity,
             chunk_index=meta.get("chunk_index", 0),
+            journal=meta.get("journal", ""),
+            volume=meta.get("volume", ""),
+            issue=meta.get("issue", ""),
+            pages=meta.get("pages", ""),
+            doi=meta.get("doi", ""),
         ))
 
     return chunks

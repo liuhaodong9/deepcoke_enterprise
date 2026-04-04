@@ -1,20 +1,12 @@
 <template>
   <div class="landing-container">
-    <!-- 动态网格背景 -->
-    <div class="grid-bg"></div>
-    <div class="glow-orb orb-1"></div>
-    <div class="glow-orb orb-2"></div>
-
     <!-- 顶部导航 -->
     <header class="landing-header">
       <div class="header-left">
         <div class="header-logo">
-          <span class="logo-icon">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-            </svg>
-          </span>
+          <span class="logo-mark"><img src="../assets/imgs/DeepCoke_logo.png" alt="DC" /></span>
           DeepCoke
+          <span class="edition-badge">Enterprise</span>
         </div>
       </div>
       <div class="header-right">
@@ -34,10 +26,13 @@
     <main class="landing-main">
       <!-- Hero 区域 -->
       <section class="hero-section">
-        <div class="hero-badge">AI-Powered Coking Intelligence</div>
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          焦化企业智能决策平台
+        </div>
         <h1 class="hero-title">Deep<span class="title-accent">Coke</span></h1>
-        <p class="hero-subtitle">智能焦化决策平台</p>
-        <p class="hero-desc">融合配煤优化、数字孪生、知识图谱与智能对话<br/>为焦化全流程提供 AI 驱动的决策支持</p>
+        <p class="hero-subtitle">焦化智能决策系统</p>
+        <p class="hero-desc">6 大专业 Agent 协作 · 18+ 项 Skills · 闭环校验 · 自主决策<br/>通过 AI 多智能体优化配煤方案、预测焦炭质量、对接产线 DCS 系统</p>
         <div class="hero-stats">
           <div class="stat-item">
             <span class="stat-value">8</span>
@@ -50,8 +45,13 @@
           </div>
           <div class="stat-divider"></div>
           <div class="stat-item">
-            <span class="stat-value">24/7</span>
-            <span class="stat-label">本地部署</span>
+            <span class="stat-value">6</span>
+            <span class="stat-label">AI Agent</span>
+          </div>
+          <div class="stat-divider"></div>
+          <div class="stat-item">
+            <span class="stat-value">OPC-UA</span>
+            <span class="stat-label">产线对接</span>
           </div>
         </div>
       </section>
@@ -68,7 +68,7 @@
             <div class="card-icon-wrapper" :style="{ background: product.gradient }">
               <i :class="product.icon" class="card-icon"></i>
             </div>
-            <span class="card-status">{{ product.status }}</span>
+            <span class="card-status" :class="{ 'card-status-dev': product.status === '开发中' || product.status === '规划中' }">{{ product.status }}</span>
           </div>
           <h3 class="card-title">{{ product.title }}</h3>
           <p class="card-desc">{{ product.desc }}</p>
@@ -81,31 +81,32 @@
       <!-- CTA 按钮 -->
       <section class="cta-section">
         <button class="cta-button" @click="enterChat">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
-          开始智能对话
+          进入工作台
         </button>
-        <p class="cta-hint">输入您的焦化问题，DeepCoke 将自动调用合适的工具为您解答</p>
+        <p class="cta-hint">输入配煤需求或工艺问题，系统将自动调度多智能体生成方案</p>
       </section>
 
       <!-- 示例问题 -->
       <section class="capabilities-section">
         <h2 class="section-title">
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="10"/>
             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
-          您可以这样问
+          试着问这些问题
         </h2>
         <div class="examples-grid">
           <div class="example-item" v-for="(example, idx) in examples" :key="idx" @click="enterChatWithQuestion(example)">
+            <span class="example-num">{{ String(idx + 1).padStart(2, '0') }}</span>
+            <span class="example-text">{{ example }}</span>
             <svg class="example-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="5" y1="12" x2="19" y2="12"/>
               <polyline points="12 5 19 12 12 19"/>
             </svg>
-            <span>{{ example }}</span>
           </div>
         </div>
       </section>
@@ -114,7 +115,7 @@
     <!-- 底部 -->
     <footer class="landing-footer">
       <img class="footer-logo" src="../assets/imgs/CompanyLogo.png" alt="Logo" />
-      <span class="footer-text">苏州龙泰氢一能源科技有限公司</span>
+      <span class="footer-text">苏州龙泰氢一能源科技有限公司 · 企业版</span>
     </footer>
   </div>
 </template>
@@ -129,47 +130,47 @@ export default {
         {
           id: 'blend',
           icon: 'el-icon-s-operation',
-          title: '智能配煤',
-          desc: '基于煤质指标与焦炭质量模型，AI 自动推算最优配煤方案，降低成本、稳定焦炭质量。',
-          gradient: 'linear-gradient(135deg, #1a3a5c 0%, #2a6496 100%)',
-          tags: ['配方优化', '成本控制', '质量预测'],
-          status: '已上线'
+          title: '配煤优化',
+          desc: '企业级多目标配煤优化引擎，综合成本、质量、库存约束，自动生成最优配比方案，降本增效。',
+          gradient: 'linear-gradient(135deg, #334155 0%, #64748B 100%)',
+          tags: ['多目标优化', '成本分析', '质量管控'],
+          status: '可用'
         },
         {
           id: 'twin',
           icon: 'el-icon-monitor',
           title: '数字孪生',
-          desc: '基于 UE5 构建的焦炉三维温度场可视化系统，实时监控炼焦过程工况与温度分布。',
-          gradient: 'linear-gradient(135deg, #ff8a00 0%, #e06b10 100%)',
-          tags: ['三维可视化', '温度场', '实时监控'],
-          status: '开发中'
+          desc: '基于 UE5 的焦炉三维实时监控，温度场可视化，支持 OPC-UA 协议对接现场数据。',
+          gradient: 'linear-gradient(135deg, #0EA5E9 0%, #38BDF8 100%)',
+          tags: ['三维监控', '温度场', 'OPC-UA'],
+          status: '规划中'
         },
         {
-          id: 'chat',
-          icon: 'el-icon-microphone',
-          title: '智能对话',
-          desc: '支持文字与语音交互，理解焦化领域专业问题，调用多种工具综合回答。',
-          gradient: 'linear-gradient(135deg, #149efa 0%, #0d6efd 100%)',
-          tags: ['语音识别', '多轮对话', '工具调度'],
-          status: '已上线'
+          id: 'dcs',
+          icon: 'el-icon-connection',
+          title: '产线对接',
+          desc: '通过 OPC-UA/Modbus 协议连接工厂 DCS/PLC 系统，实现配煤方案自动下发与执行。',
+          gradient: 'linear-gradient(135deg, #64748B 0%, #94A3B8 100%)',
+          tags: ['OPC-UA', 'Modbus', '自动执行'],
+          status: '规划中'
         },
         {
           id: 'knowledge',
           icon: 'el-icon-notebook-2',
-          title: '知识图谱',
-          desc: '基于焦化文献构建的专业知识库，回答附带文献来源引用，确保可溯源。',
-          gradient: 'linear-gradient(135deg, #1a5c3a 0%, #28a06a 100%)',
-          tags: ['文献检索', '知识问答', '来源引用'],
-          status: '已上线'
+          title: '工艺知识库',
+          desc: '企业焦化工艺知识库，涵盖文献检索、操作规程、故障诊断，为生产决策提供智能指导。',
+          gradient: 'linear-gradient(135deg, #10B981 0%, #34D399 100%)',
+          tags: ['文献检索', '知识图谱', 'RAG问答'],
+          status: '可用'
         }
       ],
       examples: [
-        '这批煤灰分12%、挥发分28%，如何配煤？',
-        '焦炉温度场异常，可能的原因有哪些？',
-        '配煤中肥煤比例过高会怎样？',
-        '查看当前焦炉实时温度分布',
-        '关于捣固焦工艺的文献有哪些？',
-        '如何降低焦炭灰分同时保证强度？'
+        '今日来煤灰分偏高，如何调整配比？',
+        '当前焦炭CSR不达标，分析原因',
+        '本月焦煤库存紧张，替代方案有哪些？',
+        '焦炉温度场偏差超限，排查建议',
+        '优化当前配比使吨焦成本降低5%',
+        '近期焦炭M40指标波动大，如何稳定？'
       ]
     }
   },
@@ -193,74 +194,43 @@ export default {
 </script>
 
 <style lang="less" scoped>
-@primary: #149efa;
-@accent: #ff8a00;
-@bg-deep: #050a14;
-@bg-card: rgba(255, 255, 255, 0.03);
-@border-subtle: rgba(255, 255, 255, 0.08);
-@text-primary: #f0f2f5;
-@text-secondary: rgba(255, 255, 255, 0.55);
-@text-muted: rgba(255, 255, 255, 0.35);
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+
+@dark: #0C0F14;
+@dark-elevated: #161A22;
+@dark-card: #1A1F28;
+@dark-border: #1F2937;
+@accent: #E2E8F0;
+@accent-dim: rgba(226, 232, 240, 0.08);
+@cyan: #0EA5E9;
+@text-bright: #F1F5F9;
+@text-secondary: #94A3B8;
+@text-muted: #64748B;
 
 .landing-container {
   min-height: 100vh;
-  background: @bg-deep;
+  background: @dark;
   position: relative;
   overflow-x: hidden;
-  color: @text-primary;
-}
-
-/* 网格背景 */
-.grid-bg {
-  position: fixed;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
-  background-size: 60px 60px;
-  z-index: 0;
-}
-
-/* 光晕装饰 */
-.glow-orb {
-  position: fixed;
-  border-radius: 50%;
-  filter: blur(120px);
-  z-index: 0;
-  pointer-events: none;
-}
-
-.orb-1 {
-  width: 500px;
-  height: 500px;
-  background: rgba(20, 158, 250, 0.08);
-  top: -100px;
-  right: -100px;
-}
-
-.orb-2 {
-  width: 400px;
-  height: 400px;
-  background: rgba(255, 138, 0, 0.06);
-  bottom: -50px;
-  left: -100px;
+  color: @text-bright;
 }
 
 /* 顶部导航 */
 .landing-header {
   position: fixed;
-  top: 16px;
-  left: 24px;
-  right: 24px;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 100;
+  height: 48px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 24px;
-  background: rgba(5, 10, 20, 0.7);
-  backdrop-filter: blur(20px);
-  border: 1px solid @border-subtle;
-  border-radius: 14px;
+  padding: 0 28px;
+  background: rgba(12, 15, 20, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid @dark-border;
 }
 
 .header-left {
@@ -269,54 +239,73 @@ export default {
 }
 
 .header-logo {
-  font-family: 'Orbitron', 'Fira Code', monospace;
-  font-size: 20px;
-  font-weight: bold;
-  color: @text-primary;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: @text-bright;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-.logo-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, @accent, @primary);
+.logo-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: @text-bright;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  overflow: hidden;
+
+  img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+  }
+}
+
+.edition-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: @accent;
+  background: @accent-dim;
+  border: 1px solid rgba(226, 232, 240, 0.25);
+  padding: 1px 7px;
+  border-radius: 4px;
+  letter-spacing: 1px;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
 .user-name {
-  color: @text-secondary;
-  font-size: 13px;
+  color: @text-muted;
+  font-size: 12px;
+  font-family: 'Noto Sans SC', sans-serif;
 }
 
 .logout-btn {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid @border-subtle;
-  color: @text-secondary;
-  font-size: 13px;
-  border-radius: 8px;
-  padding: 6px 14px;
+  background: transparent;
+  border: 1px solid @dark-border;
+  color: @text-muted;
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 4px 10px;
   cursor: pointer;
   transition: all 0.2s;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  font-family: 'Noto Sans SC', sans-serif;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: @text-primary;
-    border-color: rgba(255, 255, 255, 0.2);
+    color: @text-bright;
+    border-color: #374151;
   }
 }
 
@@ -326,117 +315,133 @@ export default {
   z-index: 1;
   max-width: 1060px;
   margin: 0 auto;
-  padding: 110px 32px 40px;
+  padding: 80px 32px 40px;
 }
 
 /* Hero 区域 */
 .hero-section {
   text-align: center;
-  padding: 48px 0 32px;
+  padding: 56px 0 36px;
 }
 
 .hero-badge {
-  display: inline-block;
-  padding: 5px 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 12px;
-  font-family: 'Fira Code', monospace;
-  color: @primary;
-  background: rgba(20, 158, 250, 0.08);
-  border: 1px solid rgba(20, 158, 250, 0.2);
+  color: @accent;
+  background: @accent-dim;
+  border: 1px solid rgba(226, 232, 240, 0.2);
   border-radius: 20px;
-  margin-bottom: 24px;
-  letter-spacing: 0.5px;
+  margin-bottom: 28px;
+  letter-spacing: 1.5px;
+  font-weight: 500;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: @accent;
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4); }
+  50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(255, 255, 255, 0); }
 }
 
 .hero-title {
-  font-family: 'Orbitron', 'Fira Code', monospace;
-  font-size: 68px;
-  font-weight: 900;
-  color: @text-primary;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 72px;
+  font-weight: 700;
+  color: @text-bright;
   margin: 0 0 8px;
   letter-spacing: 3px;
 }
 
 .title-accent {
-  background: linear-gradient(90deg, @accent, @primary);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: @accent;
 }
 
 .hero-subtitle {
-  font-size: 24px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 22px;
   color: @text-secondary;
   font-weight: 300;
-  margin: 0 0 16px;
-  letter-spacing: 6px;
+  margin: 0 0 18px;
+  letter-spacing: 8px;
 }
 
 .hero-desc {
-  font-size: 15px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 14px;
   color: @text-muted;
-  line-height: 1.8;
+  line-height: 2;
   margin: 0 auto;
 }
 
 .hero-stats {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 32px;
-  margin-top: 36px;
-  padding: 20px 40px;
-  background: @bg-card;
-  border: 1px solid @border-subtle;
-  border-radius: 14px;
-  display: inline-flex;
+  gap: 36px;
+  margin-top: 40px;
+  padding: 22px 44px;
+  background: @dark-elevated;
+  border: 1px solid @dark-border;
+  border-radius: 12px;
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
 }
 
 .stat-value {
-  font-family: 'Fira Code', monospace;
-  font-size: 24px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 26px;
   font-weight: 700;
-  color: @text-primary;
+  color: @text-bright;
 }
 
 .stat-label {
-  font-size: 12px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 11px;
   color: @text-muted;
+  letter-spacing: 1px;
 }
 
 .stat-divider {
   width: 1px;
-  height: 32px;
-  background: @border-subtle;
+  height: 36px;
+  background: @dark-border;
 }
 
-/* 产品卡片 - Bento Grid */
+/* 产品卡片 */
 .products-section {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
-  padding: 32px 0;
+  padding: 36px 0;
 }
 
 .product-card {
-  background: @bg-card;
-  border: 1px solid @border-subtle;
-  border-radius: 16px;
+  background: @dark-card;
+  border: 1px solid @dark-border;
+  border-radius: 12px;
   padding: 24px 20px;
-  transition: all 0.25s ease;
+  transition: all 0.3s ease;
   cursor: pointer;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.15);
-    transform: translateY(-4px);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+    border-color: #374151;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   }
 }
 
@@ -444,13 +449,13 @@ export default {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .card-icon-wrapper {
   width: 44px;
   height: 44px;
-  border-radius: 12px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -462,26 +467,34 @@ export default {
 }
 
 .card-status {
-  font-size: 11px;
-  padding: 2px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 3px 10px;
   border-radius: 4px;
-  background: rgba(34, 197, 94, 0.1);
-  color: #22c55e;
-  font-family: 'Fira Code', monospace;
+  background: @accent-dim;
+  color: @accent;
+  letter-spacing: 0.5px;
+}
+
+.card-status-dev {
+  background: rgba(100, 116, 139, 0.15);
+  color: @text-muted;
 }
 
 .card-title {
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 16px;
-  color: @text-primary;
-  margin: 0 0 8px;
+  color: @text-bright;
+  margin: 0 0 10px;
   font-weight: 600;
 }
 
 .card-desc {
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 13px;
-  color: @text-secondary;
-  line-height: 1.7;
-  margin: 0 0 14px;
+  color: @text-muted;
+  line-height: 1.8;
+  margin: 0 0 16px;
 }
 
 .card-tags {
@@ -491,39 +504,40 @@ export default {
 }
 
 .tag {
-  font-size: 11px;
-  font-family: 'Fira Code', monospace;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
   color: @text-muted;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid @dark-border;
+  padding: 3px 10px;
   border-radius: 4px;
 }
 
 /* CTA 按钮 */
 .cta-section {
   text-align: center;
-  padding: 16px 0 36px;
+  padding: 20px 0 40px;
 }
 
 .cta-button {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 40px;
-  font-size: 16px;
+  padding: 14px 44px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 15px;
   font-weight: 600;
-  color: #fff;
-  background: linear-gradient(135deg, @accent, @primary);
+  letter-spacing: 2px;
+  color: @dark;
+  background: @text-bright;
   border: none;
-  border-radius: 12px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: all 0.25s ease;
-  box-shadow: 0 4px 24px rgba(20, 158, 250, 0.25);
+  transition: all 0.3s ease;
 
   &:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 32px rgba(20, 158, 250, 0.35);
+    box-shadow: 0 8px 28px rgba(255, 255, 255, 0.12);
   }
 
   &:active {
@@ -532,7 +546,8 @@ export default {
 }
 
 .cta-hint {
-  margin-top: 14px;
+  font-family: 'Noto Sans SC', sans-serif;
+  margin-top: 16px;
   font-size: 13px;
   color: @text-muted;
 }
@@ -547,13 +562,14 @@ export default {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  font-size: 16px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 15px;
   color: @text-secondary;
   font-weight: 400;
-  margin: 0 0 20px;
+  margin: 0 0 24px;
 
   svg {
-    opacity: 0.5;
+    opacity: 0.4;
   }
 }
 
@@ -566,26 +582,43 @@ export default {
 .example-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 13px 18px;
-  background: @bg-card;
-  border: 1px solid @border-subtle;
+  gap: 12px;
+  padding: 14px 18px;
+  background: @dark-card;
+  border: 1px solid @dark-border;
   border-radius: 10px;
   color: @text-secondary;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: @text-primary;
-    border-color: rgba(255, 255, 255, 0.15);
+    background: @dark-elevated;
+    border-color: #374151;
+    color: @text-bright;
 
     .example-arrow {
       color: @accent;
-      transform: translateX(2px);
+      transform: translateX(3px);
+    }
+
+    .example-num {
+      color: @accent;
     }
   }
+}
+
+.example-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: @text-muted;
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+
+.example-text {
+  flex: 1;
 }
 
 .example-arrow {
@@ -601,20 +634,23 @@ export default {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px 0 28px;
-  border-top: 1px solid @border-subtle;
+  padding: 24px 0 32px;
+  border-top: 1px solid @dark-border;
 }
 
 .footer-logo {
   width: 120px;
   height: auto;
-  margin-bottom: 6px;
-  opacity: 0.5;
+  margin-bottom: 8px;
+  opacity: 0.3;
+  filter: grayscale(1) brightness(2);
 }
 
 .footer-text {
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 12px;
   color: @text-muted;
+  letter-spacing: 1px;
 }
 
 /* 响应式 */

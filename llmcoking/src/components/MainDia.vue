@@ -8,7 +8,7 @@
           <div class="welcome-logo">
             <img src="../assets/imgs/DeepCoke_logo.png" alt="DC" />
           </div>
-          <h2 class="welcome-title">有什么可以帮您？</h2>
+          <h2 class="welcome-title">您好，欢迎使用 DeepCoke 焦化智能决策系统，请输入您的问题。</h2>
           <div class="quick-actions">
             <div class="quick-item" v-for="(q, i) in quickQuestions" :key="i" @click="sendQuickQuestion(q.text)">
               <span class="quick-icon">{{ q.icon }}</span>
@@ -32,9 +32,28 @@
             <img src="../assets/imgs/DeepCoke_logo.png" alt="DC" />
           </div>
 
-          <div class="message-bubble">
+          <div class="message-bubble" @click="onBubbleClick($event)">
+            <!-- 深度思考指示器 -->
+            <div v-if="message.thinking" class="thinking-indicator" @click="message.thinkExpanded = !message.thinkExpanded">
+              <div class="thinking-header">
+                <svg v-if="message.thinking === 'active'" class="thinking-spinner" viewBox="0 0 24 24" width="16" height="16">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+                </svg>
+                <svg v-else class="thinking-done-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <span class="thinking-label">
+                  {{ message.thinking === 'active' ? '深度思考中…' : '已深度思考' }}
+                </span>
+                <span class="thinking-timer">{{ message.thinkSeconds }}s</span>
+                <svg v-if="message.thinking === 'done'" class="thinking-chevron" :class="{ expanded: message.thinkExpanded }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </div>
+              <div v-if="message.thinkExpanded && message.thinkContent" class="thinking-content" v-html="message.thinkContent"></div>
+            </div>
             <span v-if="message.text" v-html="renderMarkdown(message.text)"></span>
-            <div v-else-if="message.type === 'bot'" class="loading-dots">
+            <div v-else-if="message.type === 'bot' && !message.thinking" class="loading-dots">
               <span></span><span></span><span></span>
             </div>
           </div>
@@ -71,18 +90,6 @@
           class="input-box"
         ></el-input>
 
-        <!-- 听写按钮 -->
-        <button
-          class="input-icon-btn"
-          :class="{ active: isDictating }"
-          @click="toggleDictation"
-          title="语音输入"
-        >
-          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
-            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
-          </svg>
-        </button>
-
         <!-- 发送按钮 -->
         <button class="send-btn" :class="{ 'has-text': newMessage.trim() }" @click="sendMessage">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
@@ -93,6 +100,7 @@
       </div>
       <div class="input-footer">内容由 AI 生成，请仔细甄别</div>
     </div>
+    <chart-dialog ref="chartDialog" />
   </div>
 </template>
 
@@ -102,8 +110,10 @@ import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
+import ChartDialog from './ChartDialog.vue'
 
 export default {
+  components: { ChartDialog },
   props: ['sessionId', 'isCollapese'],
   data () {
     return {
@@ -115,6 +125,7 @@ export default {
       attachments: [],
       isDictating: false,
       voiceMode: false,
+      chartDataStore: [],
       recognition: null,
       quickQuestions: [
         { icon: '⚗', main: '优化配煤方案', sub: '基于煤质指标自动推算', text: '帮我优化一个配煤方案' },
@@ -126,11 +137,56 @@ export default {
   },
   methods: {
     renderMarkdown (text) {
-      const detailsPlaceholders = []
-      let preprocessed = text.replace(/<\/?(?:details|summary)[^>]*>/gi, (match) => {
-        const idx = detailsPlaceholders.length
-        detailsPlaceholders.push(match)
-        return `__DETAILS_PH_${idx}__`
+      // 保护进度条 HTML 和 details 标签不被转义
+      const htmlPlaceholders = []
+      let preprocessed = text
+
+      // 拦截 ECharts 图表标记，替换为按钮
+      preprocessed = preprocessed.replace(/<!--ECHART:([\s\S]*?)-->/g, (match, jsonStr) => {
+        try {
+          const desc = JSON.parse(jsonStr)
+          // 用 title + chartType 做 key 去重（避免 renderMarkdown 多次调用重复 push）
+          const key = `${desc.chartType}__${desc.title}`
+          let chartId = this.chartDataStore.findIndex(d => `${d.chartType}__${d.title}` === key)
+          if (chartId === -1) {
+            chartId = this.chartDataStore.length
+            this.chartDataStore.push(desc)
+          }
+          const idx = htmlPlaceholders.length
+          htmlPlaceholders.push(
+            `<button class="echart-btn" data-chart-id="${chartId}">📊 ${desc.title || '查看图表'}</button>`
+          )
+          return `__HTML_PH_${idx}__`
+        } catch (e) { return '' }
+      })
+
+      preprocessed = preprocessed.replace(/<div class="pipeline-progress">[\s\S]*?progress-pct[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, (match) => {
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(match)
+        return `__HTML_PH_${idx}__`
+      })
+      preprocessed = preprocessed.replace(/<\/?(?:details|summary)[^>]*>/gi, (match) => {
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(match)
+        return `__HTML_PH_${idx}__`
+      })
+      // 保护 Agent 交互按钮
+      preprocessed = preprocessed.replace(/<div class="agent-actions">[\s\S]*?<\/div>/gi, (match) => {
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(match)
+        return `__HTML_PH_${idx}__`
+      })
+      // 保护内嵌图片（如有）
+      preprocessed = preprocessed.replace(/<img\s+[^>]+>/gi, (match) => {
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(match)
+        return `__HTML_PH_${idx}__`
+      })
+      // 保护下载链接
+      preprocessed = preprocessed.replace(/<a href="[^"]*"[^>]*>[\s\S]*?<\/a>/gi, (match) => {
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(match)
+        return `__HTML_PH_${idx}__`
       })
 
       preprocessed = preprocessed
@@ -139,8 +195,8 @@ export default {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
 
-      preprocessed = preprocessed.replace(/__DETAILS_PH_(\d+)__/g, (_, idx) => {
-        return detailsPlaceholders[parseInt(idx)]
+      preprocessed = preprocessed.replace(/__HTML_PH_(\d+)__/g, (_, idx) => {
+        return htmlPlaceholders[parseInt(idx)]
       })
 
       preprocessed = preprocessed
@@ -224,6 +280,36 @@ export default {
       window.speechSynthesis.cancel()
       window.speechSynthesis.speak(u)
     },
+    onBubbleClick (e) {
+      // ECharts 图表按钮
+      const chartBtn = e.target.closest('.echart-btn')
+      if (chartBtn) {
+        e.preventDefault()
+        const chartId = parseInt(chartBtn.dataset.chartId)
+        const desc = this.chartDataStore[chartId]
+        if (desc) this.$refs.chartDialog.open(desc)
+        return
+      }
+      // Agent 指令按钮
+      const btn = e.target.closest('[data-agent-action]')
+      if (!btn) return
+      e.preventDefault()
+      const action = btn.getAttribute('data-agent-action')
+      if (action) {
+        // 禁用所有按钮（防止重复点击）
+        const container = btn.closest('.agent-actions')
+        if (container) {
+          container.querySelectorAll('.agent-btn').forEach(b => {
+            b.disabled = true
+            b.style.opacity = '0.5'
+            b.style.pointerEvents = 'none'
+          })
+        }
+        // 发送 Agent 指令
+        this.newMessage = action
+        this.sendMessage()
+      }
+    },
     sendQuickQuestion (text) {
       this.newMessage = text
       this.sendMessage()
@@ -232,9 +318,34 @@ export default {
       if (!this.newMessage.trim()) return
       const userText = this.newMessage
       this.newMessage = ''
-      this.messages.push({ text: userText, type: 'user' })
 
-      const botMessage = { text: '', type: 'bot' }
+      // Agent 指令：显示友好文本而非原始指令
+      const agentLabels = {
+        '__AGENT:confirm_blend__': '确认，开始优化',
+        '__AGENT:add_constraints__': '我要调整条件',
+        '__AGENT:auto_retry__': '让质量分析师自动调整再试',
+        '__AGENT:free_input__': '我自己输入条件',
+        '__AGENT:confirm_add_coal__': '确认录入',
+        '__AGENT:confirm_delete_coal__': '确认删除',
+        '__AGENT:confirm_update_coal__': '确认更新',
+        '__AGENT:cancel_data__': '取消操作'
+      }
+      let displayText = userText
+      if (userText.startsWith('__AGENT:')) {
+        displayText = agentLabels[userText] || userText.replace(/__AGENT:|__/g, '').replace(/_/g, ' ')
+        // pick_plan:X → 选择方案 X
+        if (userText.includes('pick_plan:')) {
+          const strategy = userText.match(/pick_plan:(\w+)/)?.[1] || '?'
+          displayText = `选择方案 ${strategy}`
+        }
+        // adjust:xxx → 显示"调整约束条件"
+        if (userText.includes(':adjust:')) {
+          displayText = '调整约束条件'
+        }
+      }
+      this.messages.push({ text: displayText, type: 'user' })
+
+      const botMessage = { text: '', type: 'bot', thinking: null, thinkSeconds: 0, thinkContent: '', thinkExpanded: false }
       this.messages.push(botMessage)
       this.scrollToBottom()
 
@@ -261,21 +372,61 @@ export default {
         const decoder = new TextDecoder()
         let botReply = ''
         let progressBlock = ''
+        const thinkStart = Date.now()
+        let thinkTimer = null
+        let isThinking = false
+        let thinkFinished = false // 一旦结束就不再恢复
+
+        // 启动思考计时器
+        const startThinking = () => {
+          if (isThinking || thinkFinished) return
+          isThinking = true
+          this.$set(botMessage, 'thinking', 'active')
+          thinkTimer = setInterval(() => {
+            this.$set(botMessage, 'thinkSeconds', Math.round((Date.now() - thinkStart) / 1000))
+          }, 100)
+        }
+
+        // 结束思考
+        const stopThinking = () => {
+          if (!isThinking) return
+          isThinking = false
+          thinkFinished = true
+          if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null }
+          this.$set(botMessage, 'thinkSeconds', Math.round((Date.now() - thinkStart) / 1000))
+          if (botMessage.thinkSeconds > 0) {
+            this.$set(botMessage, 'thinking', 'done')
+            this.$set(botMessage, 'thinkContent', progressBlock)
+          } else {
+            this.$set(botMessage, 'thinking', null)
+          }
+        }
 
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
           const chunk = decoder.decode(value, { stream: true })
 
-          if (chunk.includes('<details open>') && chunk.includes('推理链路')) {
+          if (chunk.includes('pipeline-progress')) {
+            // 进度内容 = 思考过程
+            startThinking()
             progressBlock = chunk
-            botMessage.text = progressBlock
+            // 思考阶段：更新思考内容；思考结束后：静默更新不显示
+            if (isThinking) {
+              this.$set(botMessage, 'thinkContent', progressBlock)
+            }
           } else {
+            // 正式回答到达，结束思考
+            if (isThinking) stopThinking()
             botReply += chunk
-            botMessage.text = progressBlock + botReply
+            botMessage.text = botReply
           }
           this.$nextTick(() => this.scrollToBottom())
         }
+
+        // 流结束，确保思考状态正确
+        if (isThinking) stopThinking()
+        if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null }
 
         if (this.voiceMode && botReply.trim()) this.speak(botReply)
       } catch (error) {
@@ -316,7 +467,7 @@ export default {
     streamWelcomeMessage () {
       const botMessage = { text: '', type: 'bot' }
       this.messages.push(botMessage)
-      this.streamReply(botMessage, '您好！我是焦化大语言智能问答与分析系统DeepCoke，有什么可以帮助你的？')
+      this.streamReply(botMessage, '您好，欢迎使用 DeepCoke 焦化智能决策系统，请输入您的问题。')
     }
   },
   watch: {
@@ -331,7 +482,7 @@ export default {
     if (this.sessionId === 'new') {
       const botMessage = { text: '', type: 'bot' }
       this.messages.push(botMessage)
-      this.streamReply(botMessage, '您好！我是焦化大语言智能问答与分析系统DeepCoke，有什么可以帮助你的？')
+      this.streamReply(botMessage, '您好，欢迎使用 DeepCoke 焦化智能决策系统，请输入您的问题。')
     } else {
       this.loadChatHistory()
     }
@@ -340,12 +491,14 @@ export default {
 </script>
 
 <style scoped>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+
 /* ===== 整体布局 ===== */
 .chat-wrapper {
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #0f0f0f;
+  background: #0C0F14;
 }
 
 /* ===== 消息滚动区 ===== */
@@ -385,26 +538,28 @@ export default {
 .welcome-logo {
   width: 56px;
   height: 56px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #ff8a00, #149efa);
+  border-radius: 14px;
+  background: #F1F5F9;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(255, 255, 255, 0.06);
 }
 
 .welcome-logo img {
   width: 36px;
   height: 36px;
   object-fit: contain;
-  filter: brightness(10);
 }
 
 .welcome-title {
-  font-size: 22px;
-  color: #e0e0e0;
-  font-weight: 500;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 17px;
+  color: #94A3B8;
+  font-weight: 400;
   margin: 0 0 28px;
+  text-align: center;
 }
 
 .quick-actions {
@@ -420,16 +575,16 @@ export default {
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
+  background: #161A22;
+  border: 1px solid #1F2937;
+  border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .quick-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.14);
+  background: #1A1F28;
+  border-color: #374151;
 }
 
 .quick-icon {
@@ -445,14 +600,16 @@ export default {
 }
 
 .quick-main {
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 13px;
-  color: #d0d0d0;
+  color: #F1F5F9;
   font-weight: 500;
 }
 
 .quick-sub {
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.3);
+  color: #64748B;
 }
 
 /* ===== 消息行 ===== */
@@ -477,7 +634,7 @@ export default {
 }
 
 .bot-avatar {
-  background: linear-gradient(135deg, #ff8a00, #149efa);
+  background: #F1F5F9;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -487,12 +644,12 @@ export default {
   width: 20px;
   height: 20px;
   object-fit: contain;
-  filter: brightness(10);
 }
 
 /* ===== 消息气泡 ===== */
 .message-bubble {
   max-width: 85%;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 15px;
   line-height: 1.7;
   word-wrap: break-word;
@@ -500,39 +657,42 @@ export default {
 }
 
 .message-row.bot .message-bubble {
-  color: #d4d4d4;
-  padding: 0;
+  color: #E2E8F0;
+  padding: 14px 18px;
+  background: #161A22;
+  border: 1px solid #1F2937;
+  border-radius: 4px 18px 18px 18px;
 }
 
 .message-row.user .message-bubble {
-  background: #1a3a5c;
-  color: #e0e0e0;
+  background: rgba(255, 255, 255, 0.06);
+  color: #F1F5F9;
   padding: 12px 18px;
   border-radius: 18px 18px 4px 18px;
-  border: 1px solid rgba(20, 158, 250, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 /* ===== Markdown 内容样式 ===== */
 .message-bubble span { word-break: break-word; }
 
-::v-deep .message-bubble h1 { font-size: 20px; font-weight: 600; color: #f0f0f0; margin: 16px 0 8px; }
-::v-deep .message-bubble h2 { font-size: 18px; font-weight: 600; color: #f0f0f0; margin: 14px 0 6px; }
-::v-deep .message-bubble h3 { font-size: 16px; font-weight: 600; color: #f0f0f0; margin: 12px 0 4px; }
+::v-deep .message-bubble h1 { font-size: 20px; font-weight: 600; color: #F1F5F9; margin: 16px 0 8px; }
+::v-deep .message-bubble h2 { font-size: 18px; font-weight: 600; color: #F1F5F9; margin: 14px 0 6px; }
+::v-deep .message-bubble h3 { font-size: 16px; font-weight: 600; color: #F1F5F9; margin: 12px 0 4px; }
 ::v-deep .message-bubble p { margin: 8px 0; }
 ::v-deep .message-bubble ul,
 ::v-deep .message-bubble ol { padding-left: 20px; margin: 8px 0; }
 ::v-deep .message-bubble code {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.06);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
-  font-family: 'Fira Code', monospace;
-  color: #e8ab6a;
+  font-family: 'JetBrains Mono', monospace;
+  color: #38BDF8;
 }
 ::v-deep .message-bubble pre {
-  background: #0a0a0a;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
+  background: #0C0F14;
+  border: 1px solid #1F2937;
+  border-radius: 8px;
   padding: 14px;
   margin: 10px 0;
   overflow-x: auto;
@@ -540,9 +700,9 @@ export default {
 ::v-deep .message-bubble pre code {
   background: transparent;
   padding: 0;
-  color: #d4d4d4;
+  color: #CBD5E1;
 }
-::v-deep .message-bubble a { color: #58a6ff; }
+::v-deep .message-bubble a { color: #38BDF8; text-decoration: underline; text-underline-offset: 2px; }
 ::v-deep .message-bubble table {
   border-collapse: collapse;
   margin: 10px 0;
@@ -550,41 +710,41 @@ export default {
 }
 ::v-deep .message-bubble th,
 ::v-deep .message-bubble td {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #1F2937;
   padding: 8px 12px;
   text-align: left;
 }
 ::v-deep .message-bubble th {
   background: rgba(255, 255, 255, 0.04);
-  color: #e0e0e0;
+  color: #F1F5F9;
 }
 
 /* ===== 推理过程折叠块 ===== */
 ::v-deep .message-bubble details {
-  background: rgba(20, 158, 250, 0.04);
-  border: 1px solid rgba(20, 158, 250, 0.12);
-  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #1F2937;
+  border-radius: 8px;
   padding: 10px 14px;
   margin: 8px 0 12px;
 }
 ::v-deep .message-bubble details summary {
   cursor: pointer;
-  color: #7eb8f7;
+  color: #94A3B8;
   font-size: 14px;
   user-select: none;
 }
 ::v-deep .message-bubble details summary:hover {
-  color: #58a6ff;
+  color: #F1F5F9;
 }
 ::v-deep .message-bubble details[open] summary {
   margin-bottom: 8px;
-  border-bottom: 1px solid rgba(20, 158, 250, 0.1);
+  border-bottom: 1px solid #1F2937;
   padding-bottom: 6px;
 }
 ::v-deep .message-bubble details p,
 ::v-deep .message-bubble details li {
   font-size: 13px;
-  color: #9a9a9a;
+  color: #94A3B8;
 }
 
 /* ===== 加载动画 ===== */
@@ -598,7 +758,7 @@ export default {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #444;
+  background: #94A3B8;
   animation: dots 1.4s infinite ease-in-out;
 }
 
@@ -609,6 +769,86 @@ export default {
 @keyframes dots {
   0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
   40% { opacity: 1; transform: scale(1); }
+}
+
+/* ===== 深度思考指示器 ===== */
+.thinking-indicator {
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.thinking-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #94A3B8;
+  transition: color 0.2s;
+}
+
+.thinking-header:hover {
+  color: #CBD5E1;
+}
+
+.thinking-spinner {
+  animation: think-spin 1s linear infinite;
+  color: #38BDF8;
+  flex-shrink: 0;
+}
+
+@keyframes think-spin {
+  to { transform: rotate(360deg); }
+}
+
+.thinking-done-icon {
+  color: #38BDF8;
+  flex-shrink: 0;
+}
+
+.thinking-label {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-weight: 500;
+}
+
+.thinking-timer {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  color: #64748B;
+  min-width: 28px;
+}
+
+.thinking-chevron {
+  margin-left: auto;
+  transition: transform 0.2s;
+  color: #64748B;
+}
+
+.thinking-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.thinking-content {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #1F2937;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #94A3B8;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.thinking-content::-webkit-scrollbar {
+  width: 4px;
+}
+
+.thinking-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
 }
 
 /* ===== 输入区域 ===== */
@@ -625,15 +865,16 @@ export default {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  background: #1a1a1a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
+  background: #161A22;
+  border: 1px solid #1F2937;
+  border-radius: 12px;
   padding: 8px 8px 8px 4px;
   transition: border-color 0.2s;
 }
 
 .input-wrapper:focus-within {
-  border-color: rgba(20, 158, 250, 0.3);
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
 }
 
 /* ===== 输入框 ===== */
@@ -648,15 +889,15 @@ export default {
   padding: 6px 8px;
   box-shadow: none !important;
   resize: none;
-  font-family: "Microsoft YaHei", -apple-system, sans-serif;
+  font-family: 'Noto Sans SC', -apple-system, sans-serif;
   font-size: 15px;
   line-height: 1.5;
   background: transparent !important;
-  color: #e0e0e0;
+  color: #F1F5F9;
 }
 
 ::v-deep .el-textarea__inner::placeholder {
-  color: #555;
+  color: #64748B;
 }
 
 ::v-deep .el-textarea__inner:focus {
@@ -671,7 +912,7 @@ export default {
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #666;
+  color: #64748B;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -682,12 +923,7 @@ export default {
 
 .input-icon-btn:hover {
   background: rgba(255, 255, 255, 0.06);
-  color: #aaa;
-}
-
-.input-icon-btn.active {
-  color: #149efa;
-  background: rgba(20, 158, 250, 0.12);
+  color: #94A3B8;
 }
 
 /* ===== 发送按钮 ===== */
@@ -696,8 +932,8 @@ export default {
   height: 34px;
   border: none;
   border-radius: 50%;
-  background: #2a2a2a;
-  color: #555;
+  background: #1F2937;
+  color: #64748B;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -707,21 +943,195 @@ export default {
 }
 
 .send-btn.has-text {
-  background: linear-gradient(135deg, #ff8a00, #149efa);
-  color: #fff;
+  background: #F1F5F9;
+  color: #0C0F14;
   cursor: pointer;
 }
 
 .send-btn.has-text:hover {
-  opacity: 0.9;
-  transform: scale(1.05);
+  background: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
 }
 
 /* ===== 底部提示 ===== */
 .input-footer {
   text-align: center;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 12px;
-  color: #444;
+  color: #475569;
   padding-top: 8px;
+}
+</style>
+
+<style>
+/* ECharts 图表按钮（v-html 注入） */
+.echart-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background: #1F2937;
+  color: #38BDF8;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  margin: 8px 4px;
+  transition: background 0.2s;
+  font-family: inherit;
+}
+.echart-btn:hover {
+  background: #334155;
+}
+
+/* 进度条样式（不能 scoped，因为是 v-html 注入） */
+.pipeline-progress {
+  background: #111318;
+  border: 1px solid #1F2937;
+  border-radius: 10px;
+  padding: 14px 16px 12px;
+  margin-bottom: 8px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 13px;
+}
+
+.progress-step {
+  color: #94A3B8;
+  padding: 3px 0;
+  line-height: 1.6;
+}
+
+.progress-bar-wrap {
+  margin-top: 10px;
+  height: 4px;
+  background: #1F2937;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #94A3B8, #CBD5E1);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.progress-bar-complete {
+  background: linear-gradient(90deg, #10B981, #34D399) !important;
+}
+
+.progress-pct {
+  text-align: right;
+  font-size: 11px;
+  color: #64748B;
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.progress-pct-done {
+  text-align: right;
+  font-size: 11px;
+  color: #10B981;
+  margin-top: 4px;
+  font-weight: 500;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Agent 详情展开面板 */
+.agent-details {
+  margin-top: 6px;
+  margin-bottom: 4px;
+}
+
+.agent-details summary {
+  cursor: pointer;
+  color: #64748B;
+  font-size: 12px;
+  user-select: none;
+  padding: 2px 0;
+}
+
+.agent-details summary:hover {
+  color: #F1F5F9;
+}
+
+.agent-details-content {
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid #374151;
+  padding: 8px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748B;
+  line-height: 1.7;
+  border-radius: 0 4px 4px 0;
+}
+
+.agent-detail-item {
+  padding: 2px 0;
+}
+
+.agent-detail-item .agent-name {
+  color: #F1F5F9;
+  font-weight: 600;
+}
+
+.agent-detail-item .tool-call {
+  color: #A78BFA;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.agent-detail-item .tool-result {
+  color: #34D399;
+  font-size: 11px;
+}
+
+.agent-detail-item .agent-decision {
+  color: #94A3B8;
+  font-style: italic;
+}
+
+/* Agent 交互按钮 */
+.agent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #1F2937;
+}
+
+.agent-btn {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid #374151;
+  background: rgba(255, 255, 255, 0.04);
+  color: #CBD5E1;
+}
+
+.agent-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #4B5563;
+  color: #F1F5F9;
+}
+
+.agent-btn-primary {
+  background: #F1F5F9;
+  color: #0C0F14;
+  border-color: #F1F5F9;
+  font-weight: 600;
+}
+
+.agent-btn-primary:hover {
+  background: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+}
+
+.agent-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 </style>

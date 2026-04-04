@@ -17,6 +17,11 @@ class PaperMetadata:
     abstract: str = ""
     keywords: list[str] = None
     year: int | None = None
+    journal: str = ""
+    volume: str = ""
+    issue: str = ""
+    pages: str = ""
+    doi: str = ""
 
     def __post_init__(self):
         if self.authors is None:
@@ -33,12 +38,20 @@ Given the first ~2 pages of text from a PDF paper, extract the following metadat
   "authors": ["Author One", "Author Two"],
   "abstract": "the full abstract text",
   "keywords": ["keyword1", "keyword2"],
-  "year": 2020
+  "year": 2020,
+  "journal": "journal or conference name",
+  "volume": "volume number",
+  "issue": "issue number",
+  "pages": "start page-end page",
+  "doi": "DOI if found"
 }
 
 Rules:
 - If a field cannot be determined, use empty string/list/null.
 - For year, look for publication year in headers, footers, or journal info.
+- For journal, look for journal name in headers, footers, or first page info (e.g. "Fuel", "Energy & Fuels", "ISIJ International").
+- For volume/issue/pages, look for patterns like "Vol. 123", "No. 4", "pp. 100-110" or similar.
+- For DOI, look for patterns like "10.xxxx/..." or "doi.org/...".
 - Return ONLY the JSON object, no other text.
 """
 
@@ -71,6 +84,11 @@ def extract_metadata(first_pages_text: str, file_path: str = "") -> PaperMetadat
         abstract=data.get("abstract", ""),
         keywords=data.get("keywords", []),
         year=data.get("year"),
+        journal=data.get("journal", ""),
+        volume=str(data.get("volume", "")),
+        issue=str(data.get("issue", "")),
+        pages=str(data.get("pages", "")),
+        doi=str(data.get("doi", "")),
     )
 
 

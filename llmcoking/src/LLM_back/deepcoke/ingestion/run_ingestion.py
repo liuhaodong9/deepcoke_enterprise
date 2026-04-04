@@ -212,6 +212,11 @@ def run():
                 "year": meta.year or 0,
                 "authors": ", ".join(meta.authors[:5]),
                 "keywords": ", ".join(meta.keywords[:10]),
+                "journal": meta.journal[:100] if meta.journal else "",
+                "volume": meta.volume[:20] if meta.volume else "",
+                "issue": meta.issue[:20] if meta.issue else "",
+                "pages": meta.pages[:30] if meta.pages else "",
+                "doi": meta.doi[:100] if meta.doi else "",
             },
         )
 

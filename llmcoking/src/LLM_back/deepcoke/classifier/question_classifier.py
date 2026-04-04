@@ -7,6 +7,7 @@ from ..llm_client import chat_json
 # Question types and their descriptions
 QUESTION_TYPES = {
     "optimization": "asking to optimize coal blending ratios, predict coke quality (CRI/CSR), or find best blend",
+    "data_management": "adding, updating, deleting, or querying coal sample data in the database",
     "factual": "asking for a specific fact, definition, or value",
     "comparison": "comparing two or more things (methods, materials, properties)",
     "causal": "asking why something happens, cause-effect relationships",
@@ -21,11 +22,25 @@ COMPLEX_TYPES = {"comparison", "causal", "recommendation"}
 SIMPLE_RAG_TYPES = {"factual", "process"}
 
 # ── 关键词优先匹配（不依赖 LLM，速度快且稳定）──────────────────
+_DATA_MGMT_KEYWORDS = re.compile(
+    r"添加.*煤|新增.*煤|录入.*煤|入库.*煤|导入.*煤"
+    r"|删除.*煤|移除.*煤|去掉.*煤"
+    r"|修改.*煤|更新.*煤|改一下.*煤"
+    r"|煤.*添加|煤.*新增|煤.*录入|煤.*入库|煤.*导入"
+    r"|煤.*删除|煤.*移除|煤.*去掉"
+    r"|煤.*修改|煤.*更新|煤.*改一下"
+    r"|加一个煤|加几个煤|加个煤|加条煤"
+    r"|查看.*煤样|看.*煤样|所有煤样|煤样.*列表|煤样.*数据|煤样数据库|数据库.*煤样|数据库.*煤"
+    r"|CNN.*预测|用CNN|用模型预测|预测.*这.*煤|这个煤.*预测"
+    r"|灰分.*硫分.*粘结|Ad.*G.*CRI",
+    re.IGNORECASE,
+)
+
 _OPTIMIZATION_KEYWORDS = re.compile(
-    r"配煤|配比|优化配|煤种|煤样"
+    r"配煤|配比|优化配|煤种"
     r"|预测.*(?:CRI|CSR|质量)|(?:CRI|CSR|M10|M25).*(?:大于|小于|范围|要求|限制|预测)"
     r"|成本最低|最优方案|混合比例|配方|料斗|blend|opti"
-    r"|哪些煤|可用.*煤|查.*煤|列.*煤|煤.*列表|煤.*查"
+    r"|哪些煤|可用.*煤|列.*煤"
     r"|多模型|模型.*对比|对比.*预测"
     r"|优化.*方案|方案.*优化",
     re.IGNORECASE,
@@ -34,6 +49,7 @@ _OPTIMIZATION_KEYWORDS = re.compile(
 _CLASSIFY_PROMPT = """You are a question classifier for a coal coking domain Q&A system.
 
 Classify the user's question into EXACTLY ONE of these types:
+- data_management: adding, updating, deleting, or querying coal sample data in the database (e.g. "添加一个煤样", "录入煤数据", "删除XX煤")
 - optimization: asking to optimize coal blending ratios, predict coke quality (CRI/CSR/M10/M25), find best blend, query available coals, or calculate blending costs
 - factual: asking for a specific fact, definition, or value
 - comparison: comparing two or more things (methods, materials, properties)
@@ -50,7 +66,9 @@ def classify_question(question: str) -> str:
     Classify a question into one of the predefined types.
     Uses keyword matching first (fast & reliable), falls back to LLM.
     """
-    # 1) 关键词快速匹配 — 配煤/优化类问题直接路由
+    # 1) 关键词快速匹配
+    if _DATA_MGMT_KEYWORDS.search(question):
+        return "data_management"
     if _OPTIMIZATION_KEYWORDS.search(question):
         return "optimization"
 
@@ -81,4 +99,4 @@ def is_complex(question_type: str) -> bool:
 
 def needs_rag(question_type: str) -> bool:
     """Whether this question type needs RAG retrieval."""
-    return question_type not in ("general_chat", "optimization")
+    return question_type not in ("general_chat", "optimization", "data_management")

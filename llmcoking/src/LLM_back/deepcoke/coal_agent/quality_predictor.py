@@ -1,8 +1,11 @@
-"""焦炭质量预测 - 多模型支持 (RF/SVR/KNN/Linear/DecisionTree/GBR)"""
+"""焦炭质量预测 - 多模型支持 (RF/SVR/KNN/Linear/DecisionTree/GBR/CNN)"""
 
 import os
 import pickle
+import logging
 import numpy as np
+
+logger = logging.getLogger("deepcoke.quality_predictor")
 
 MODEL_DIR = os.path.dirname(__file__)
 
@@ -35,9 +38,10 @@ class QualityPredictor:
         Args:
             blend_ratios: {"红果": 30, "晋茂": 40, ...} (百分比)
             coal_props: 煤样属性字典 {name: {coal_mad, Ad, Vdaf, coal_std, G, X, Y, ...}}
-            model_name: RF/SVR/KNN/Linear/DecisionTree/GBR
+            model_name: RF/SVR/KNN/Linear/DecisionTree/GBR/CNN
         """
-        features = np.zeros(7)
+        # 按配比加权计算混合煤的特征
+        features = np.zeros(7)  # [Mad, Ad, Vdaf, St.d, G, X, Y]
         total = sum(blend_ratios.values())
         for name, pct in blend_ratios.items():
             if name not in coal_props:
@@ -49,9 +53,29 @@ class QualityPredictor:
                 p.get("coal_std", 0), p.get("G", 0), p.get("X", 0), p.get("Y", 0),
             ])
 
-        norm = ((features - X_MIN) / (X_MAX - X_MIN)).reshape(1, -1)
-
         result = {"model": model_name, "Ad": round(float(features[1]), 2)}
+
+        # CNN 预测（6维输入：Mad, Ad, Vdaf, St.d, G, Y，没有 X）
+        if model_name == "CNN":
+            try:
+                from ..skills.cnn_predict import predict_cri_csr
+                cnn_result = predict_cri_csr(
+                    mad=float(features[0]), ad=float(features[1]),
+                    vdaf=float(features[2]), std=float(features[3]),
+                    g=float(features[4]), y=float(features[6]),
+                )
+                if "error" in cnn_result:
+                    result["error"] = cnn_result["error"]
+                else:
+                    result["CRI"] = cnn_result["CRI"]
+                    result["CSR"] = cnn_result["CSR"]
+            except Exception as e:
+                logger.error(f"CNN 预测失败: {e}")
+                result["error"] = f"CNN 预测失败: {e}"
+            return result
+
+        # 传统 ML 模型
+        norm = ((features - X_MIN) / (X_MAX - X_MIN)).reshape(1, -1)
 
         if model_name == "SVR" and "SVR_CRI" in self.models:
             result["CRI"] = round(float(self.models["SVR_CRI"].predict(norm)[0]), 2)
@@ -69,7 +93,7 @@ class QualityPredictor:
         return result
 
     def available_models(self):
-        names = []
+        names = ["CNN"]  # CNN 始终可用
         for k in self.models:
             base = k.split("_")[0]
             if base not in names:

@@ -8,7 +8,7 @@
                 <div class="sidebar-top">
                     <div class="sidebar-header">
                         <div class="logo">
-                            <span class="logo-dot"></span>
+                            <span class="logo-mark"><img src="../assets/imgs/DeepCoke_logo.png" alt="DC" /></span>
                             DeepCoke
                         </div>
                         <button class="icon-btn" @click="toggleCollapse" title="收起侧边栏">
@@ -81,12 +81,6 @@
                     </svg>
                 </button>
                 <div class="top-bar-right">
-                    <button class="voice-top-btn" @click="goVoiceChat">
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor">
-                            <path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
-                        </svg>
-                        <span>语音对话</span>
-                    </button>
                 </div>
             </div>
             <router-view :sessionId="sessionId" :isCollapese="isCollapese" @update-sessions="fetchChatSessions"></router-view>
@@ -209,6 +203,17 @@ export default {
 </script>
 
 <style lang="less" scoped>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+
+@dark: #0C0F14;
+@dark-sidebar: #111318;
+@dark-border: #1F2937;
+@dark-hover: #1A1F28;
+@accent: #E2E8F0;
+@accent-dim: rgba(226, 232, 240, 0.06);
+@text-bright: #F1F5F9;
+@text-secondary: #94A3B8;
+@text-muted: #64748B;
 
 /* ===== 布局 ===== */
 .el-container {
@@ -220,14 +225,14 @@ export default {
 
 /* ===== 侧边栏 ===== */
 .el-aside {
-  background: #0a0a0a;
+  background: @dark-sidebar;
   width: 260px;
   position: relative;
   height: 100vh;
   transition: width 0.2s ease;
   overflow: hidden;
   flex-shrink: 0;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  border-right: 1px solid @dark-border;
 }
 
 .sidebar-inner {
@@ -251,21 +256,30 @@ export default {
 }
 
 .logo {
-  font-family: 'Orbitron', 'Fira Code', monospace;
-  font-size: 18px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
   font-weight: 700;
-  color: #e0e0e0;
+  color: @text-bright;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.logo-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #ff8a00, #149efa);
-  box-shadow: 0 0 8px rgba(20, 158, 250, 0.4);
+.logo-mark {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: @text-bright;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+
+  img {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+  }
 }
 
 /* ===== 通用图标按钮 ===== */
@@ -275,7 +289,7 @@ export default {
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #666;
+  color: @text-muted;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -285,18 +299,19 @@ export default {
 }
 
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #aaa;
+  background: @dark-hover;
+  color: @text-secondary;
 }
 
 /* ===== 新对话按钮 ===== */
 .new-chat-btn {
   width: 100%;
   height: 38px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #c0c0c0;
+  border: 1px solid @dark-border;
+  border-radius: 8px;
+  background: transparent;
+  color: @text-secondary;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -307,9 +322,9 @@ export default {
 }
 
 .new-chat-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.18);
-  color: #e0e0e0;
+  background: @dark-hover;
+  border-color: #374151;
+  color: @text-bright;
 }
 
 /* ===== 历史记录 ===== */
@@ -320,12 +335,12 @@ export default {
 }
 
 .history-label {
-  font-size: 11px;
-  color: #555;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: @text-muted;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 1.5px;
   padding: 8px 12px 6px;
-  font-family: 'Fira Code', monospace;
 }
 
 .chat-history::-webkit-scrollbar {
@@ -333,7 +348,7 @@ export default {
 }
 
 .chat-history::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.06);
+  background: #374151;
   border-radius: 4px;
 }
 
@@ -346,30 +361,32 @@ export default {
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.12s;
+  border: 1px solid transparent;
 }
 
 .chat-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: @dark-hover;
 }
 
 .chat-item.active {
-  background: rgba(20, 158, 250, 0.08);
-  border: 1px solid rgba(20, 158, 250, 0.12);
+  background: @accent-dim;
+  border-color: rgba(226, 232, 240, 0.2);
 }
 
 .chat-item-icon {
-  color: #555;
+  color: @text-muted;
   flex-shrink: 0;
 }
 
 .chat-item.active .chat-item-icon {
-  color: #149efa;
+  color: @accent;
 }
 
 .chat-title {
   flex: 1;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 13px;
-  color: #999;
+  color: @text-secondary;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -377,12 +394,12 @@ export default {
 }
 
 .chat-item.active .chat-title {
-  color: #d0d0d0;
+  color: @text-bright;
 }
 
 .chat-menu-btn {
   opacity: 0;
-  color: #666;
+  color: @text-muted;
   padding: 2px 4px;
   border-radius: 4px;
   transition: all 0.12s;
@@ -395,15 +412,15 @@ export default {
 }
 
 .chat-menu-btn:hover {
-  color: #aaa;
-  background: rgba(255, 255, 255, 0.08);
+  color: @text-secondary;
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* ===== 侧边栏底部 ===== */
 .sidebar-bottom {
   flex-shrink: 0;
   padding: 8px 12px 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid @dark-border;
 }
 
 .sidebar-bottom-btn {
@@ -412,7 +429,8 @@ export default {
   border: none;
   border-radius: 8px;
   background: transparent;
-  color: #666;
+  color: @text-muted;
+  font-family: 'Noto Sans SC', sans-serif;
   font-size: 13px;
   display: flex;
   align-items: center;
@@ -423,13 +441,13 @@ export default {
 }
 
 .sidebar-bottom-btn:hover {
-  background: rgba(255, 255, 255, 0.04);
-  color: #aaa;
+  background: @dark-hover;
+  color: @text-secondary;
 }
 
 /* ===== 右侧主体 ===== */
 .el-main {
-  background: #0f0f0f;
+  background: @dark;
   width: 100%;
   height: 100vh;
   overflow: hidden;
@@ -457,30 +475,4 @@ export default {
   gap: 8px;
   margin-left: auto;
 }
-
-.voice-top-btn {
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.03);
-  color: #888;
-  font-size: 13px;
-  padding: 0 14px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s;
-}
-
-.voice-top-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #ccc;
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-.voice-top-btn svg {
-  opacity: 0.6;
-}
-
 </style>

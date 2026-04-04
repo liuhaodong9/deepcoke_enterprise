@@ -50,6 +50,11 @@ def build_evidence_context(chunks: list[RetrievedChunk]) -> tuple[str, list[dict
                 "year": chunk.year,
                 "authors": chunk.authors,
                 "category": chunk.category,
+                "journal": chunk.journal,
+                "volume": chunk.volume,
+                "issue": chunk.issue,
+                "pages": chunk.pages,
+                "doi": chunk.doi,
             })
 
         ref_num = ref_map[pid]
@@ -62,19 +67,52 @@ def build_evidence_context(chunks: list[RetrievedChunk]) -> tuple[str, list[dict
 
 
 def format_references(references: list[dict]) -> str:
-    """Format the reference list as markdown."""
+    """Format the reference list as standard academic markdown.
+
+    格式：[n] 作者. 标题[J]. 期刊, 年, 卷(期): 页码.
+    """
     if not references:
         return ""
 
-    lines = ["\n\n---\n\n**参考文献：**"]
+    lines = ["\n\n---\n\n**参考文献：**\n"]
     for ref in references:
-        authors = ref["authors"]
-        if len(authors) > 50:
-            authors = authors[:50] + " et al."
-        year = f" ({ref['year']})" if ref["year"] else ""
-        lines.append(f"[{ref['num']}] {authors}. \"{ref['title']}\"{year}")
+        authors = ref.get("authors", "")
+        if len(authors) > 60:
+            authors = authors[:60] + ", et al."
 
-    return "\n".join(lines)
+        title = ref.get("title", "")
+        year = ref.get("year", "")
+        journal = ref.get("journal", "")
+        volume = ref.get("volume", "")
+        issue = ref.get("issue", "")
+        pages = ref.get("pages", "")
+        doi = ref.get("doi", "")
+
+        # 构建标准引用格式
+        parts = [f"[{ref['num']}] {authors}. {title}[J]."]
+
+        # 期刊信息
+        source_parts = []
+        if journal:
+            source_parts.append(f" {journal}")
+        if year:
+            source_parts.append(f" {year}")
+        if volume:
+            vol_str = f", {volume}"
+            if issue:
+                vol_str += f"({issue})"
+            source_parts.append(vol_str)
+        if pages:
+            source_parts.append(f": {pages}")
+
+        parts.append("".join(source_parts) + ".")
+
+        if doi:
+            parts.append(f" DOI: {doi}")
+
+        lines.append("".join(parts))
+
+    return "\n\n".join(lines)
 
 
 def build_answer_prompt(

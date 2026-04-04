@@ -65,7 +65,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)  # 主键，自增
     session_id = Column(String(50), ForeignKey("chat_sessions.session_id"), nullable=False)  # 关联会话 ID
     user_message = Column(Text, nullable=False)  # 用户输入的消息
-    bot_response = Column(Text, nullable=False)  # AI 生成的回复
+    bot_response = Column(Text(length=2**32-1), nullable=False)  # AI 生成的回复（LONGTEXT）
     timestamp = Column(TIMESTAMP, nullable=False)  # 记录时间戳
 
 # 延迟初始化数据库（在 FastAPI 启动事件中执行，避免模块加载时 MySQL 未启动导致崩溃）
@@ -185,7 +185,7 @@ async def chat(session_id: str, user_message: str, db: Session = Depends(get_db)
             # 使用 DeepCoke 知识增强管线处理问题
             # 管线内部完成：问题分类 → 中英翻译 → 向量检索 + KG检索 →
             # ESCARGOT推理(复杂问题) → 证据驱动回答生成 → 延伸问题生成
-            async for piece in process_question(user_message):
+            async for piece in process_question(user_message, session_id=session_id):
                 bot_response_parts.append(piece)
                 yield piece
                 await asyncio.sleep(0)
@@ -294,3 +294,35 @@ async def get_messages(session_id: str, db: Session = Depends(get_db)):
             chat_history.append({"text": msg.bot_response, "type": "bot"})
 
     return chat_history  # ✅ user 和 bot 按顺序交替返回
+
+
+# 5️⃣ **煤样数据下载（Excel）**
+@app.get("/download_coals/")
+async def download_coals():
+    """导出所有煤样数据为 Excel 文件下载。"""
+    import io
+    import pandas as pd
+    from starlette.responses import Response
+    from deepcoke.coal_agent.coal_db import get_all_coals
+
+    rows = get_all_coals()
+    df = pd.DataFrame(rows)
+    # 重命名列
+    col_map = {
+        "coal_name": "煤样名称", "coal_type": "煤种类型", "coal_price": "价格(元/吨)",
+        "coal_mad": "水分Mad(%)", "coal_ad": "灰分Ad(%)", "coal_vdaf": "挥发分Vdaf(%)",
+        "coal_std": "硫分St,d(%)", "G": "粘结指数G", "X": "胶质层X(mm)", "Y": "胶质层Y(mm)",
+        "coke_CRI": "CRI(%)", "coke_CSR": "CSR(%)", "coke_M10": "M10(%)",
+        "coke_M25": "M25(%)", "coke_M40": "M40(%)",
+    }
+    df = df.rename(columns=col_map)
+
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False, engine="openpyxl")
+    buf.seek(0)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=coal_data.xlsx"},
+    )
