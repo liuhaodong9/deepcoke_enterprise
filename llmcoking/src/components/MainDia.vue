@@ -1,4 +1,5 @@
 <template>
+  <div class="chat-outer" :class="{ 'pdf-open': pdfPanelVisible }">
   <div class="chat-wrapper">
     <!-- 聊天内容区域 -->
     <div class="chat-scroll" ref="chatScroll">
@@ -52,9 +53,10 @@
               </div>
               <div v-if="message.thinkExpanded && message.thinkContent" class="thinking-content" v-html="message.thinkContent"></div>
             </div>
-            <span v-if="message.text" v-html="renderMarkdown(message.text)"></span>
-            <div v-else-if="message.type === 'bot' && !message.thinking" class="loading-dots">
-              <span></span><span></span><span></span>
+            <div v-if="message.text" class="md-content" v-html="renderMarkdown(message.text)"></div>
+            <div v-else-if="message.type === 'bot' && !message.thinking" class="loading-hint">
+              <div class="loading-dots"><span></span><span></span><span></span></div>
+              <div class="loading-text">DeepCoke 正在分析您的问题…</div>
             </div>
           </div>
         </div>
@@ -102,15 +104,38 @@
     </div>
     <chart-dialog ref="chartDialog" />
   </div>
+
+  <!-- 右侧 PDF 全文面板 -->
+  <div v-if="pdfPanelVisible" class="pdf-panel">
+    <div class="pdf-panel-header">
+      <span class="pdf-panel-title">📄 文献原文</span>
+      <button class="pdf-panel-close" @click="closePdfPanel">✕</button>
+    </div>
+    <iframe :src="pdfPanelUrl" class="pdf-panel-iframe"></iframe>
+  </div>
+  </div>
 </template>
 
 <script>
-import { marked } from 'marked'
+import MarkdownIt from 'markdown-it'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github-dark.css'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import ChartDialog from './ChartDialog.vue'
+
+// 初始化 markdown-it（比 marked 更可靠地处理流式标题/列表）
+const md = new MarkdownIt({
+  html: true,
+  breaks: true,
+  linkify: true,
+  highlight: function (code, lang) {
+    if (lang && hljs.getLanguage(lang)) {
+      return hljs.highlight(code, { language: lang }).value
+    }
+    return hljs.highlightAuto(code).value
+  }
+})
 
 export default {
   components: { ChartDialog },
@@ -127,6 +152,8 @@ export default {
       voiceMode: false,
       chartDataStore: [],
       recognition: null,
+      pdfPanelVisible: false,
+      pdfPanelUrl: '',
       quickQuestions: [
         { icon: '⚗', main: '优化配煤方案', sub: '基于煤质指标自动推算', text: '帮我优化一个配煤方案' },
         { icon: '📊', main: '预测焦炭质量', sub: '灰分、硫分、强度预测', text: '预测这批煤的焦炭质量' },
@@ -156,49 +183,63 @@ export default {
           htmlPlaceholders.push(
             `<button class="echart-btn" data-chart-id="${chartId}">📊 ${desc.title || '查看图表'}</button>`
           )
-          return `__HTML_PH_${idx}__`
+          return `<!--PH${idx}-->`
         } catch (e) { return '' }
       })
 
       preprocessed = preprocessed.replace(/<div class="pipeline-progress">[\s\S]*?progress-pct[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi, (match) => {
         const idx = htmlPlaceholders.length
         htmlPlaceholders.push(match)
-        return `__HTML_PH_${idx}__`
+        return `<!--PH${idx}-->`
       })
       preprocessed = preprocessed.replace(/<\/?(?:details|summary)[^>]*>/gi, (match) => {
         const idx = htmlPlaceholders.length
         htmlPlaceholders.push(match)
-        return `__HTML_PH_${idx}__`
+        return `<!--PH${idx}-->`
       })
       // 保护 Agent 交互按钮
       preprocessed = preprocessed.replace(/<div class="agent-actions">[\s\S]*?<\/div>/gi, (match) => {
         const idx = htmlPlaceholders.length
         htmlPlaceholders.push(match)
-        return `__HTML_PH_${idx}__`
+        return `<!--PH${idx}-->`
       })
-      // 保护内嵌图片（如有）
+      // 保护文献图表卡片（<div> 包裹的图片+标题），补全相对路径
+      preprocessed = preprocessed.replace(/<div\s+style="margin:12px[^"]*">[\s\S]*?<\/div>/gi, (match) => {
+        const fixed = match.replace(/src="\/static\//g, `src="${this.apiBaseUrl}/static/`)
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(fixed)
+        return `\n<!--PH${idx}-->\n`
+      })
+      // 保护内嵌图片（如有），补全相对路径为完整 API URL
       preprocessed = preprocessed.replace(/<img\s+[^>]+>/gi, (match) => {
+        const fixed = match.replace(/src="\/static\//g, `src="${this.apiBaseUrl}/static/`)
+        const idx = htmlPlaceholders.length
+        htmlPlaceholders.push(fixed)
+        return `\n<!--PH${idx}-->\n`
+      })
+      // 保护链接（含参考文献的 ref-link 和下载链接），连带后面的 <br> 一起保护
+      preprocessed = preprocessed.replace(/<a\s[^>]*>[\s\S]*?<\/a>(?:\s*<br\s*\/?>)?/gi, (match) => {
         const idx = htmlPlaceholders.length
         htmlPlaceholders.push(match)
-        return `__HTML_PH_${idx}__`
-      })
-      // 保护下载链接
-      preprocessed = preprocessed.replace(/<a href="[^"]*"[^>]*>[\s\S]*?<\/a>/gi, (match) => {
-        const idx = htmlPlaceholders.length
-        htmlPlaceholders.push(match)
-        return `__HTML_PH_${idx}__`
+        return `\n<!--PH${idx}-->\n`
       })
 
-      preprocessed = preprocessed
-        .replace(/\s*<br\s*\/?>\s*/gi, '\n\n')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
+      // 将 <br> 转为换行
+      preprocessed = preprocessed.replace(/\s*<br\s*\/?>\s*/gi, '\n')
 
-      preprocessed = preprocessed.replace(/__HTML_PH_(\d+)__/g, (_, idx) => {
-        return htmlPlaceholders[parseInt(idx)]
-      })
+      // 修正 Markdown 格式：LLM 流式输出常见问题
+      // 1. 标题前必须有空行（行内 #### 无法识别）
+      preprocessed = preprocessed.replace(/([^\n])(#{1,6}\s)/g, '$1\n\n$2')
+      // 2. ###\n标题 → ### 标题（标题文字和 # 必须同一行）
+      preprocessed = preprocessed.replace(/^(#{1,6})\s*\n+\s*(\S)/gm, '$1 $2')
+      // 3. ####标题 → #### 标题（# 后必须有空格）
+      preprocessed = preprocessed.replace(/^(#{1,6})([^\s#])/gm, '$1 $2')
+      // 4. 中文序号前换行
+      preprocessed = preprocessed.replace(/([^\n])([一二三四五六七八九十]+、)/g, '$1\n\n$2')
+      // 5. 数字列表前换行
+      preprocessed = preprocessed.replace(/([^\n])(\d+\.\s)/g, '$1\n\n$2')
 
+      // KaTeX 公式渲染
       preprocessed = preprocessed
         .replace(/\$\$(.*?)\$\$/gs, (_, equation) => {
           return katex.renderToString(equation.trim(), {
@@ -206,20 +247,44 @@ export default {
             displayMode: true
           })
         })
-        .replace(/(^|[^\d])\$(\S+?)\$(?!\d)/g, (_, before, equation) => {
+        .replace(/(^|[^$\\])\$([^$\n]+?)\$(?![0-9$])/g, (_, before, equation) => {
           return before + katex.renderToString(equation.trim(), {
             throwOnError: false,
             displayMode: false
           })
         })
 
-      const html = marked(preprocessed, {
-        breaks: true,
-        gfm: true,
-        highlight: function (code, lang) {
-          const language = hljs.getLanguage(lang) ? lang : 'plaintext'
-          return hljs.highlight(code, { language }).value
+      // 使用 markdown-it 渲染（比 marked 更可靠地处理标题和列表）
+      let html = md.render(preprocessed)
+
+      // 在 marked 处理之后再还原受保护的 HTML 片段（避免 marked 破坏原始 HTML）
+      html = html.replace(/<!--PH(\d+)-->/g, (_, idx) => {
+        return htmlPlaceholders[parseInt(idx)]
+      })
+
+      // 从参考文献区的 ref-link 中提取 refNum → {href, excerpt}
+      const refMap = {}
+      const excerptRegex = /<a[^>]*data-ref="(\d+)"[^>]*href="([^"]*)"[^>]*data-excerpt="([^"]*)"[^>]*/g
+      let refMatch
+      while ((refMatch = excerptRegex.exec(html)) !== null) {
+        refMap[refMatch[1]] = { href: refMatch[2], excerpt: refMatch[3] }
+      }
+      // 也匹配属性顺序不同的情况
+      const excerptRegex2 = /<a[^>]*href="([^"]*)"[^>]*data-ref="(\d+)"[^>]*data-excerpt="([^"]*)"[^>]*/g
+      while ((refMatch = excerptRegex2.exec(html)) !== null) {
+        if (!refMap[refMatch[2]]) {
+          refMap[refMatch[2]] = { href: refMatch[1], excerpt: refMatch[3] }
         }
+      }
+
+      // 将正文中的 [N] 引用标注转为可点击链接（排除已在 <a> 标签内的）
+      html = html.replace(/(?:<a[^>]*>[\s\S]*?<\/a>)|(\[(\d{1,2})\])/g, (match, cite, num) => {
+        if (!cite) return match
+        const ref = refMap[num]
+        if (ref) {
+          return `<a class="inline-cite" href="${ref.href}" data-ref="${num}" data-excerpt="${ref.excerpt}">[${num}]</a>`
+        }
+        return match
       })
 
       return html
@@ -281,6 +346,19 @@ export default {
       window.speechSynthesis.speak(u)
     },
     onBubbleClick (e) {
+      // 参考文献 PDF 链接 或 正文内联引用：打开 PDF 查看器
+      const pdfLink = e.target.closest('.ref-link') || e.target.closest('.inline-cite')
+      if (pdfLink) {
+        e.preventDefault()
+        let href = pdfLink.getAttribute('href')
+        if (href) {
+          // 将 /pdf/N?... 转为 /pdf_viewer/N?... 以使用带高亮的查看器
+          href = href.replace(/^\/pdf\//, '/pdf_viewer/')
+          this.pdfPanelUrl = `${this.apiBaseUrl}${href}`
+          this.pdfPanelVisible = true
+        }
+        return
+      }
       // ECharts 图表按钮
       const chartBtn = e.target.closest('.echart-btn')
       if (chartBtn) {
@@ -310,6 +388,10 @@ export default {
         this.sendMessage()
       }
     },
+    closePdfPanel () {
+      this.pdfPanelVisible = false
+      this.pdfPanelUrl = ''
+    },
     sendQuickQuestion (text) {
       this.newMessage = text
       this.sendMessage()
@@ -328,7 +410,8 @@ export default {
         '__AGENT:confirm_add_coal__': '确认录入',
         '__AGENT:confirm_delete_coal__': '确认删除',
         '__AGENT:confirm_update_coal__': '确认更新',
-        '__AGENT:cancel_data__': '取消操作'
+        '__AGENT:cancel_data__': '取消操作',
+        '__AGENT:use_all_coals__': '用全部煤种优化'
       }
       let displayText = userText
       if (userText.startsWith('__AGENT:')) {
@@ -371,57 +454,86 @@ export default {
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
         let botReply = ''
-        let progressBlock = ''
+        let buffer = '' // 缓冲区，按 __PG__ / __/PG__ 标记分割进度块
         const thinkStart = Date.now()
         let thinkTimer = null
         let isThinking = false
-        let thinkFinished = false // 一旦结束就不再恢复
 
         // 启动思考计时器
         const startThinking = () => {
-          if (isThinking || thinkFinished) return
+          if (isThinking) return
           isThinking = true
           this.$set(botMessage, 'thinking', 'active')
-          thinkTimer = setInterval(() => {
-            this.$set(botMessage, 'thinkSeconds', Math.round((Date.now() - thinkStart) / 1000))
-          }, 100)
+          if (!thinkTimer) {
+            thinkTimer = setInterval(() => {
+              this.$set(botMessage, 'thinkSeconds', Math.round((Date.now() - thinkStart) / 1000))
+            }, 100)
+          }
         }
 
         // 结束思考
         const stopThinking = () => {
           if (!isThinking) return
           isThinking = false
-          thinkFinished = true
-          if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null }
           this.$set(botMessage, 'thinkSeconds', Math.round((Date.now() - thinkStart) / 1000))
-          if (botMessage.thinkSeconds > 0) {
-            this.$set(botMessage, 'thinking', 'done')
-            this.$set(botMessage, 'thinkContent', progressBlock)
-          } else {
-            this.$set(botMessage, 'thinking', null)
-          }
+          this.$set(botMessage, 'thinking', 'done')
         }
 
         while (true) {
           const { value, done } = await reader.read()
           if (done) break
-          const chunk = decoder.decode(value, { stream: true })
+          buffer += decoder.decode(value, { stream: true })
 
-          if (chunk.includes('pipeline-progress')) {
-            // 进度内容 = 思考过程
-            startThinking()
-            progressBlock = chunk
-            // 思考阶段：更新思考内容；思考结束后：静默更新不显示
-            if (isThinking) {
-              this.$set(botMessage, 'thinkContent', progressBlock)
+          // 按 __PG__ / __/PG__ 标记分割进度块和正文
+          while (true) {
+            const pgStart = buffer.indexOf('__PG__')
+            const pgEnd = buffer.indexOf('__/PG__')
+
+            if (pgStart !== -1 && pgEnd !== -1 && pgEnd > pgStart) {
+              // 完整的进度块：__PG__...content...__/PG__
+              // pgStart 之前的是正文
+              const textBefore = buffer.substring(0, pgStart)
+              if (textBefore.trim()) {
+                if (isThinking) stopThinking()
+                botReply += textBefore
+                botMessage.text = botReply
+              }
+              // 提取进度 HTML（去掉标记）
+              const progressHtml = buffer.substring(pgStart + 6, pgEnd)
+              startThinking()
+              this.$set(botMessage, 'thinkContent', progressHtml)
+              // 移除已处理的部分
+              buffer = buffer.substring(pgEnd + 7)
+            } else if (pgStart !== -1 && pgEnd === -1) {
+              // 有开始标记但没结束标记 → 等更多数据
+              // 先把开始标记之前的正文输出
+              const textBefore = buffer.substring(0, pgStart)
+              if (textBefore.trim()) {
+                if (isThinking) stopThinking()
+                botReply += textBefore
+                botMessage.text = botReply
+              }
+              buffer = buffer.substring(pgStart)
+              break
+            } else {
+              // 没有进度标记 → 全部是正文
+              if (buffer.trim()) {
+                if (isThinking) stopThinking()
+                botReply += buffer
+                botMessage.text = botReply
+              }
+              buffer = ''
+              break
             }
-          } else {
-            // 正式回答到达，结束思考
-            if (isThinking) stopThinking()
-            botReply += chunk
-            botMessage.text = botReply
           }
+
           this.$nextTick(() => this.scrollToBottom())
+        }
+
+        // 处理缓冲区残留
+        if (buffer.trim()) {
+          botReply += buffer
+          botMessage.text = botReply
         }
 
         // 流结束，确保思考状态正确
@@ -444,7 +556,12 @@ export default {
         const data = await response.json()
         this.messages = data
           .filter(msg => msg.type !== 'user' || msg.text.trim() !== '')
-          .map(msg => ({ text: msg.text, type: msg.type }))
+          .map(msg => ({
+            text: msg.type === 'bot'
+              ? msg.text.replace(/__PG__[\s\S]*?__\/PG__/g, '').replace(/<div class="pipeline-progress">[\s\S]*?<\/div>\s*<\/div>/gi, '')
+              : msg.text,
+            type: msg.type
+          }))
         if (this.sessionId === 'new') {
           this.streamWelcomeMessage()
         }
@@ -486,6 +603,36 @@ export default {
     } else {
       this.loadChatHistory()
     }
+
+    // 引用悬浮气泡：事件委托
+    let tooltip = null
+    this.$el.addEventListener('mouseover', (e) => {
+      const cite = e.target.closest('.inline-cite, .ref-link')
+      if (!cite) return
+      const excerpt = cite.dataset.excerpt
+      if (!excerpt) return
+      // 创建气泡
+      if (tooltip) tooltip.remove()
+      tooltip = document.createElement('div')
+      tooltip.className = 'cite-tooltip'
+      tooltip.innerHTML = `<div class="cite-tooltip-title">📄 原文摘录</div><div class="cite-tooltip-text">${excerpt}</div>`
+      document.body.appendChild(tooltip)
+      // 定位到元素上方
+      const rect = cite.getBoundingClientRect()
+      tooltip.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 380)) + 'px'
+      tooltip.style.top = (rect.top + window.scrollY - tooltip.offsetHeight - 8) + 'px'
+      // 如果上方放不下，放到下方
+      if (rect.top - tooltip.offsetHeight - 8 < 0) {
+        tooltip.style.top = (rect.bottom + window.scrollY + 8) + 'px'
+      }
+    })
+    this.$el.addEventListener('mouseout', (e) => {
+      const cite = e.target.closest('.inline-cite, .ref-link')
+      if (cite && tooltip) {
+        tooltip.remove()
+        tooltip = null
+      }
+    })
   }
 }
 </script>
@@ -494,11 +641,70 @@ export default {
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 
 /* ===== 整体布局 ===== */
+.chat-outer {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
 .chat-wrapper {
   display: flex;
   flex-direction: column;
   height: 100vh;
   background: #0C0F14;
+  flex: 1;
+  min-width: 0;
+  transition: flex 0.3s ease;
+}
+.chat-outer.pdf-open .chat-wrapper {
+  flex: 0 0 50%;
+}
+
+/* ===== 右侧 PDF 面板 ===== */
+.pdf-panel {
+  flex: 0 0 50%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #111827;
+  border-left: 2px solid #1e293b;
+}
+.pdf-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #1f2937;
+  border-bottom: 1px solid #374151;
+  flex-shrink: 0;
+}
+.pdf-panel-title {
+  color: #93c5fd;
+  font-size: 14px;
+  font-weight: 600;
+}
+.pdf-panel-close {
+  background: #374151;
+  border: 1px solid #4b5563;
+  color: #e5e7eb;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.pdf-panel-close:hover {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+.pdf-panel-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
 }
 
 /* ===== 消息滚动区 ===== */
@@ -672,51 +878,167 @@ export default {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-/* ===== Markdown 内容样式 ===== */
-.message-bubble span { word-break: break-word; }
+/* ===== Markdown 内容样式（ChatGPT 风格） ===== */
+.message-bubble .md-content { word-break: break-word; }
 
-::v-deep .message-bubble h1 { font-size: 20px; font-weight: 600; color: #F1F5F9; margin: 16px 0 8px; }
-::v-deep .message-bubble h2 { font-size: 18px; font-weight: 600; color: #F1F5F9; margin: 14px 0 6px; }
-::v-deep .message-bubble h3 { font-size: 16px; font-weight: 600; color: #F1F5F9; margin: 12px 0 4px; }
-::v-deep .message-bubble p { margin: 8px 0; }
+/* 标题层级 */
+::v-deep .message-bubble h1 {
+  font-size: 20px;
+  font-weight: 700;
+  color: #F1F5F9;
+  margin: 24px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1F2937;
+}
+::v-deep .message-bubble h2 {
+  font-size: 17px;
+  font-weight: 600;
+  color: #F1F5F9;
+  margin: 20px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+::v-deep .message-bubble h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #E2E8F0;
+  margin: 16px 0 8px;
+}
+::v-deep .message-bubble h1:first-child,
+::v-deep .message-bubble h2:first-child,
+::v-deep .message-bubble h3:first-child { margin-top: 0; }
+
+/* 段落 */
+::v-deep .message-bubble p { margin: 8px 0; line-height: 1.75; }
+
+/* 列表 */
 ::v-deep .message-bubble ul,
-::v-deep .message-bubble ol { padding-left: 20px; margin: 8px 0; }
+::v-deep .message-bubble ol {
+  padding-left: 24px;
+  margin: 10px 0;
+}
+::v-deep .message-bubble li {
+  margin: 4px 0;
+  line-height: 1.7;
+}
+::v-deep .message-bubble li::marker {
+  color: #64748B;
+}
+::v-deep .message-bubble ul li { list-style-type: disc; }
+::v-deep .message-bubble ul li ul li { list-style-type: circle; }
+
+/* 粗体 / 强调 */
+::v-deep .message-bubble strong {
+  color: #F8FAFC;
+  font-weight: 600;
+}
+::v-deep .message-bubble em {
+  color: #CBD5E1;
+  font-style: italic;
+}
+
+/* 行内代码 */
 ::v-deep .message-bubble code {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(56, 189, 248, 0.08);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
   font-family: 'JetBrains Mono', monospace;
   color: #38BDF8;
+  border: 1px solid rgba(56, 189, 248, 0.12);
 }
+
+/* 代码块 */
 ::v-deep .message-bubble pre {
-  background: #0C0F14;
+  background: #0D1117;
   border: 1px solid #1F2937;
-  border-radius: 8px;
-  padding: 14px;
-  margin: 10px 0;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 12px 0;
   overflow-x: auto;
 }
 ::v-deep .message-bubble pre code {
   background: transparent;
   padding: 0;
   color: #CBD5E1;
+  border: none;
+  font-size: 13px;
+  line-height: 1.6;
 }
-::v-deep .message-bubble a { color: #38BDF8; text-decoration: underline; text-underline-offset: 2px; }
+
+/* 链接 */
+::v-deep .message-bubble a {
+  color: #38BDF8;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+  transition: border-color 0.2s;
+}
+::v-deep .message-bubble a:hover {
+  border-bottom-color: #38BDF8;
+}
+
+/* 表格 */
 ::v-deep .message-bubble table {
-  border-collapse: collapse;
-  margin: 10px 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 12px 0;
   width: 100%;
-}
-::v-deep .message-bubble th,
-::v-deep .message-bubble td {
+  border-radius: 8px;
+  overflow: hidden;
   border: 1px solid #1F2937;
-  padding: 8px 12px;
-  text-align: left;
+  font-size: 14px;
 }
 ::v-deep .message-bubble th {
-  background: rgba(255, 255, 255, 0.04);
-  color: #F1F5F9;
+  background: rgba(56, 189, 248, 0.06);
+  color: #E2E8F0;
+  font-weight: 600;
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid #1F2937;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+::v-deep .message-bubble td {
+  padding: 9px 14px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  color: #CBD5E1;
+}
+::v-deep .message-bubble tr:last-child td {
+  border-bottom: none;
+}
+::v-deep .message-bubble tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* 引用块 */
+::v-deep .message-bubble blockquote {
+  margin: 12px 0;
+  padding: 10px 16px;
+  border-left: 3px solid #38BDF8;
+  background: rgba(56, 189, 248, 0.04);
+  border-radius: 0 8px 8px 0;
+  color: #94A3B8;
+  font-size: 14px;
+}
+::v-deep .message-bubble blockquote p {
+  margin: 4px 0;
+}
+
+/* 分隔线 */
+::v-deep .message-bubble hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #334155, transparent);
+  margin: 20px 0;
+}
+
+/* 图片 */
+::v-deep .message-bubble img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 8px 0;
 }
 
 /* ===== 推理过程折叠块 ===== */
@@ -748,6 +1070,25 @@ export default {
 }
 
 /* ===== 加载动画 ===== */
+.loading-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.loading-text {
+  font-size: 13px;
+  color: #94A3B8;
+  animation: pulse-text 2s infinite ease-in-out;
+}
+
+@keyframes pulse-text {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
 .loading-dots {
   display: flex;
   gap: 5px;
@@ -982,6 +1323,44 @@ export default {
   background: #334155;
 }
 
+/* 参考文献链接 */
+.ref-link {
+  color: #38BDF8 !important;
+  text-decoration: none !important;
+  border-bottom: 1px dashed rgba(56, 189, 248, 0.4);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.ref-link:hover {
+  color: #7DD3FC !important;
+  border-bottom-color: #38BDF8;
+  background: rgba(56, 189, 248, 0.06);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+.ref-link::after {
+  content: ' 📄';
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+/* 正文中的内联引用标注 [N] */
+.inline-cite {
+  color: #38BDF8;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85em;
+  vertical-align: super;
+  text-decoration: none;
+  transition: all 0.2s;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+.inline-cite:hover {
+  color: #7DD3FC;
+  background: rgba(56, 189, 248, 0.12);
+}
+
 /* 进度条样式（不能 scoped，因为是 v-html 注入） */
 .pipeline-progress {
   background: #111318;
@@ -1133,5 +1512,35 @@ export default {
 .agent-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* 引用悬浮气泡 */
+.cite-tooltip {
+  position: absolute;
+  z-index: 9999;
+  max-width: 380px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 12px 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  pointer-events: none;
+  animation: tooltipFadeIn 0.15s ease-out;
+}
+@keyframes tooltipFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.cite-tooltip-title {
+  font-size: 12px;
+  color: #60a5fa;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.cite-tooltip-text {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.6;
+  word-break: break-word;
 }
 </style>

@@ -30,8 +30,11 @@ node_modules/
 
 # 数据文件
 llmcoking/src/LLM_back/deepcoke/data/chromadb/
+llmcoking/src/LLM_back/deepcoke/data/chromadb_store/
 llmcoking/src/LLM_back/deepcoke/data/bge-base-en-v1.5/
 llmcoking/src/LLM_back/deepcoke/data/papers.db
+llmcoking/src/LLM_back/papers.db
+llmcoking/src/LLM_back/static/figures/
 
 # 构建产物
 llmcoking/dist/

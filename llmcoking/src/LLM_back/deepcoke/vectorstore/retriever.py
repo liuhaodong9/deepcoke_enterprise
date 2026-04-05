@@ -1,6 +1,7 @@
 """
 Semantic retrieval over the ChromaDB coking papers collection.
 """
+import sqlite3
 from dataclasses import dataclass
 
 from .chromadb_store import get_collection
@@ -82,4 +83,53 @@ def retrieve(
             doi=meta.get("doi", ""),
         ))
 
+    # 从 papers.db 补全 journal/volume/issue/pages/doi 等字段
+    _enrich_from_papers_db(chunks)
+
     return chunks
+
+
+def _enrich_from_papers_db(chunks: list[RetrievedChunk]):
+    """从 papers.db 查询补全 ChromaDB 中缺失的元数据字段"""
+    if not chunks:
+        return
+
+    paper_ids = list({c.paper_id for c in chunks if c.paper_id})
+    if not paper_ids:
+        return
+
+    try:
+        db_path = config.DATA_DIR / "papers.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join("?" * len(paper_ids))
+        rows = conn.execute(
+            f"SELECT id, title, authors, year, journal, volume, issue, pages, doi "
+            f"FROM papers WHERE id IN ({placeholders})",
+            paper_ids,
+        ).fetchall()
+        conn.close()
+
+        db_map = {r["id"]: r for r in rows}
+        for chunk in chunks:
+            row = db_map.get(chunk.paper_id)
+            if not row:
+                continue
+            if not chunk.journal and row["journal"]:
+                chunk.journal = row["journal"]
+            if not chunk.volume and row["volume"]:
+                chunk.volume = row["volume"]
+            if not chunk.issue and row["issue"]:
+                chunk.issue = row["issue"]
+            if not chunk.pages and row["pages"]:
+                chunk.pages = row["pages"]
+            if not chunk.doi and row["doi"]:
+                chunk.doi = row["doi"]
+            if (not chunk.authors or chunk.authors == "[]") and row["authors"] and row["authors"] != "[]":
+                chunk.authors = row["authors"]
+            if row["title"] and len(row["title"]) > len(chunk.title or ""):
+                chunk.title = row["title"]
+            if not chunk.year and row["year"]:
+                chunk.year = row["year"]
+    except Exception:
+        pass  # 数据库不可用时静默降级

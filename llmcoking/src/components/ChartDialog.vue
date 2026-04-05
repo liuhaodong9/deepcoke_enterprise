@@ -8,7 +8,7 @@
     @closed="disposeChart"
     append-to-body
   >
-    <div ref="chartContainer" class="chart-container"></div>
+    <div ref="chartContainer" class="chart-container" :style="{ height: chartHeight }"></div>
   </el-dialog>
 </template>
 
@@ -36,6 +36,7 @@ export default {
       visible: false,
       chartData: null,
       chartTitle: '',
+      chartHeight: '450px',
       chartInstance: null
     }
   },
@@ -43,6 +44,7 @@ export default {
     open (descriptor) {
       this.chartData = descriptor
       this.chartTitle = descriptor.title || '图表'
+      this.chartHeight = descriptor.chartType === 'blend_dashboard' ? '520px' : '450px'
       this.visible = true
     },
     renderChart () {
@@ -63,6 +65,15 @@ export default {
           break
         case 'radar':
           option = this.buildRadar(this.chartData)
+          break
+        case 'blend_dashboard':
+          option = this.buildBlendDashboard(this.chartData)
+          break
+        case 'bar':
+          option = this.buildBar(this.chartData)
+          break
+        case 'line':
+          option = this.buildLine(this.chartData)
           break
       }
       if (option) {
@@ -254,6 +265,235 @@ export default {
             }
           }
         }]
+      }
+    },
+
+    // ── 配煤方案仪表盘（饼图 + 仪表盘） ──
+    buildBlendDashboard (desc) {
+      const pieData = desc.pieData || []
+      const predictions = desc.predictions || {}
+      const constraints = desc.constraints || {}
+      const costPerTon = desc.costPerTon || 0
+      const model = desc.recommended_model || ''
+      const passed = desc.passed
+
+      const pieColors = [C.cyan, C.green, C.gold, C.red, C.purple, '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16']
+
+      const series = []
+      const titles = [
+        {
+          text: desc.title + (passed ? ' ✅ 达标' : ' ⚠️ 不达标'),
+          left: 'center',
+          top: 5,
+          textStyle: { color: C.text, fontSize: 16, fontWeight: 'bold' }
+        },
+        {
+          text: '配煤比例',
+          left: '25%',
+          top: 35,
+          textAlign: 'center',
+          textStyle: { color: C.label, fontSize: 13 }
+        }
+      ]
+
+      // 饼图（左侧）
+      series.push({
+        type: 'pie',
+        radius: ['22%', '48%'],
+        center: ['25%', '58%'],
+        data: pieData.map((d, i) => ({
+          ...d,
+          itemStyle: { color: pieColors[i % pieColors.length] }
+        })),
+        label: {
+          color: C.text,
+          fontSize: 11,
+          formatter: '{b}\n{d}%'
+        },
+        emphasis: {
+          itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' }
+        }
+      })
+
+      // 仪表盘（右侧）— CRI 和 CSR
+      const gaugeItems = []
+      if (predictions.CRI != null) {
+        const criMax = constraints.CRI_max || 35
+        gaugeItems.push({
+          name: 'CRI (热反应性)',
+          value: predictions.CRI,
+          min: 15,
+          max: 45,
+          center: ['62%', '55%'],
+          // CRI 越低越好：绿色区域在目标以下，红色在上
+          colors: [[criMax / 45, C.green], [1, C.red]],
+          constraint: criMax,
+          constraintLabel: `上限≤${criMax}`
+        })
+      }
+      if (predictions.CSR != null) {
+        const csrMin = constraints.CSR_min || 60
+        gaugeItems.push({
+          name: 'CSR (热强度)',
+          value: predictions.CSR,
+          min: 40,
+          max: 80,
+          center: ['88%', '55%'],
+          // CSR 越高越好：红色区域在目标以下，绿色在上
+          colors: [[csrMin / 80, C.red], [1, C.green]],
+          constraint: csrMin,
+          constraintLabel: `下限≥${csrMin}`
+        })
+      }
+
+      gaugeItems.forEach((g, idx) => {
+        titles.push({
+          text: g.name,
+          left: g.center[0],
+          top: 35,
+          textAlign: 'center',
+          textStyle: { color: C.label, fontSize: 12 }
+        })
+        series.push({
+          type: 'gauge',
+          center: g.center,
+          radius: '32%',
+          min: g.min,
+          max: g.max,
+          splitNumber: 6,
+          axisLine: {
+            lineStyle: {
+              width: 12,
+              color: g.colors
+            }
+          },
+          pointer: {
+            width: 4,
+            length: '60%',
+            itemStyle: { color: C.text }
+          },
+          axisTick: { show: true, lineStyle: { color: C.label, width: 1 }, length: 6 },
+          splitLine: { length: 10, lineStyle: { color: C.label, width: 1 } },
+          axisLabel: { color: C.label, fontSize: 9, distance: 15 },
+          detail: {
+            formatter: '{value}',
+            color: C.text,
+            fontSize: 20,
+            fontWeight: 'bold',
+            offsetCenter: [0, '75%']
+          },
+          title: {
+            show: true,
+            offsetCenter: [0, '95%'],
+            color: C.gold,
+            fontSize: 10
+          },
+          data: [{ value: g.value, name: g.constraintLabel }]
+        })
+      })
+
+      // 底部成本信息
+      const graphic = []
+      if (costPerTon > 0) {
+        graphic.push({
+          type: 'text',
+          left: 'center',
+          bottom: 10,
+          style: {
+            text: `吨煤成本: ${costPerTon.toFixed(1)} 元/吨  |  推荐模型: ${model}`,
+            fill: C.gold,
+            fontSize: 13,
+            fontWeight: 'bold'
+          }
+        })
+      }
+
+      return {
+        backgroundColor: C.bg,
+        title: titles,
+        tooltip: { trigger: 'item' },
+        series,
+        graphic
+      }
+    },
+
+    // ── 柱状图（LLM 文献数据可视化） ──
+    buildBar (desc) {
+      const categories = desc.categories || []
+      const seriesData = desc.series || []
+      const colors = [C.cyan, C.green, C.gold, C.red, C.purple]
+      return {
+        backgroundColor: C.bg,
+        tooltip: { trigger: 'axis' },
+        legend: {
+          data: seriesData.map(s => s.name),
+          textStyle: { color: C.label },
+          top: 5
+        },
+        grid: { left: 60, right: 30, top: 50, bottom: 40 },
+        xAxis: {
+          type: 'category',
+          data: categories,
+          axisLabel: { color: C.label, fontSize: 11, rotate: categories.length > 6 ? 30 : 0 },
+          axisLine: { lineStyle: { color: C.border } }
+        },
+        yAxis: {
+          type: 'value',
+          name: desc.yLabel || '',
+          nameTextStyle: { color: C.label },
+          axisLabel: { color: C.label },
+          axisLine: { lineStyle: { color: C.border } },
+          splitLine: { lineStyle: { color: C.grid, type: 'dashed' } }
+        },
+        series: seriesData.map((s, i) => ({
+          name: s.name,
+          type: 'bar',
+          data: s.data,
+          itemStyle: { color: colors[i % colors.length] },
+          barMaxWidth: 40
+        }))
+      }
+    },
+
+    // ── 折线图（LLM 文献数据可视化） ──
+    buildLine (desc) {
+      const categories = desc.categories || []
+      const seriesData = desc.series || []
+      const colors = [C.cyan, C.green, C.gold, C.red, C.purple]
+      return {
+        backgroundColor: C.bg,
+        tooltip: { trigger: 'axis' },
+        legend: {
+          data: seriesData.map(s => s.name),
+          textStyle: { color: C.label },
+          top: 5
+        },
+        grid: { left: 60, right: 30, top: 50, bottom: 40 },
+        xAxis: {
+          type: 'category',
+          data: categories,
+          name: desc.xLabel || '',
+          nameTextStyle: { color: C.label },
+          axisLabel: { color: C.label, fontSize: 11 },
+          axisLine: { lineStyle: { color: C.border } }
+        },
+        yAxis: {
+          type: 'value',
+          name: desc.yLabel || '',
+          nameTextStyle: { color: C.label },
+          axisLabel: { color: C.label },
+          axisLine: { lineStyle: { color: C.border } },
+          splitLine: { lineStyle: { color: C.grid, type: 'dashed' } }
+        },
+        series: seriesData.map((s, i) => ({
+          name: s.name,
+          type: 'line',
+          data: s.data,
+          smooth: true,
+          lineStyle: { color: colors[i % colors.length], width: 2 },
+          itemStyle: { color: colors[i % colors.length] },
+          areaStyle: { color: colors[i % colors.length] + '20' }
+        }))
       }
     },
 

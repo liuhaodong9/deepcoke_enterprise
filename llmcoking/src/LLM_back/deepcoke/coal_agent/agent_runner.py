@@ -68,7 +68,8 @@ def _generate_summary(question: str, plans_report: str) -> str:
                     "1. 对每个方案的简要点评（一两句话）\n"
                     "2. 你的推荐意见（推荐哪个方案，为什么）\n"
                     "3. 如果没有完全达标的方案，说明原因和建议\n"
-                    "使用中文，Markdown 格式。简洁有力。"
+                    "使用中文，直接用 Markdown 格式输出。简洁有力。\n"
+                    "重要：直接输出内容，不要用 ```markdown``` 代码块包裹。"
                 ),
             },
             {
@@ -87,7 +88,12 @@ def _generate_summary(question: str, plans_report: str) -> str:
     try:
         resp = requests.post(OLLAMA_CHAT_URL, json=payload, timeout=60)
         resp.raise_for_status()
-        return resp.json()["message"].get("content", "")
+        content = resp.json()["message"].get("content", "")
+        # 清理 LLM 可能包裹的代码块
+        import re
+        content = re.sub(r'^```\s*(?:markdown|md)?\s*\n', '', content.strip())
+        content = re.sub(r'\n```\s*$', '', content.strip())
+        return content
     except Exception as e:
         logger.error(f"总结报告生成失败: {e}")
         return ""

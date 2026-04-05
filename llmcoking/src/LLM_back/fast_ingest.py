@@ -160,6 +160,18 @@ def run():
         conn.commit()
         paper_id = cursor.lastrowid
 
+        # 从 papers.db 查询已有的元数据（CrossRef 提取的）
+        row = conn.execute(
+            "SELECT authors, journal, volume, issue, pages, doi FROM papers WHERE id=?",
+            (paper_id,),
+        ).fetchone()
+        authors = (row[0] if row and row[0] and row[0] != "[]" else "") if row else ""
+        journal = (row[1] or "") if row else ""
+        volume = (row[2] or "") if row else ""
+        issue = (row[3] or "") if row else ""
+        pages = (row[4] or "") if row else ""
+        doi = (row[5] or "") if row else ""
+
         # 写入 ChromaDB
         upsert_chunks(
             collection=collection,
@@ -169,8 +181,13 @@ def run():
                 "title": title[:200],
                 "category": category,
                 "year": year or 0,
-                "authors": "",
+                "authors": authors,
                 "keywords": "",
+                "journal": journal,
+                "volume": volume,
+                "issue": issue,
+                "pages": pages,
+                "doi": doi,
             },
         )
 

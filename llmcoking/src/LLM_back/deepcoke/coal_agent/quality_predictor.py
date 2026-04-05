@@ -93,7 +93,13 @@ class QualityPredictor:
         return result
 
     def available_models(self):
-        names = ["CNN"]  # CNN 始终可用
+        names = []
+        # CNN 仅在 TensorFlow 可用时列出
+        try:
+            import tensorflow
+            names.append("CNN")
+        except ImportError:
+            pass
         for k in self.models:
             base = k.split("_")[0]
             if base not in names:

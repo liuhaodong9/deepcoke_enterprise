@@ -8,7 +8,9 @@ import json
 from typing import AsyncGenerator
 
 from .classifier.question_classifier import classify_question, is_complex, needs_rag
-from .agents import research_agent, reasoning_agent, report_agent
+from .agents import report_agent
+from .skills.research_skills import translate_and_extract, search_literature, search_knowledge_graph
+from .skills.reasoning_skills import deep_reasoning
 from .coal_agent.agent_runner import run_agent as run_coal_agent
 from .coal_agent.coal_db import (
     get_all_coals, get_coal_by_name, add_coal, update_coal,
@@ -118,11 +120,11 @@ def _build_adjustment_buttons(constraints: dict) -> list[dict]:
 
     # 新增约束按钮（当前没有的）
     if "CRI_max" not in constraints:
-        buttons.append({"label": "新增 CRI 上限 ≤ 30",
-                        "action": "__AGENT:adjust:add_CRI_max_30__", "style": "default"})
+        buttons.append({"label": "新增 CRI 上限 ≤ 38",
+                        "action": "__AGENT:adjust:add_CRI_max_38__", "style": "default"})
     if "CSR_min" not in constraints:
-        buttons.append({"label": "新增 CSR 下限 ≥ 60",
-                        "action": "__AGENT:adjust:add_CSR_min_60__", "style": "default"})
+        buttons.append({"label": "新增 CSR 下限 ≥ 43",
+                        "action": "__AGENT:adjust:add_CSR_min_43__", "style": "default"})
     if "Ad_max" not in constraints:
         buttons.append({"label": "新增灰分上限 ≤ 13",
                         "action": "__AGENT:adjust:add_Ad_max_13__", "style": "default"})
@@ -140,17 +142,17 @@ def _apply_adjustment(constraints: dict, adjust_key: str) -> dict:
     c = dict(constraints)  # 浅拷贝
 
     adjustments = {
-        "CRI_max_up2":    lambda: c.update(CRI_max=c.get("CRI_max", 30) + 2),
-        "CRI_max_up5":    lambda: c.update(CRI_max=c.get("CRI_max", 30) + 5),
-        "CRI_max_down2":  lambda: c.update(CRI_max=c.get("CRI_max", 30) - 2),
-        "CSR_min_down2":  lambda: c.update(CSR_min=c.get("CSR_min", 60) - 2),
-        "CSR_min_down5":  lambda: c.update(CSR_min=c.get("CSR_min", 60) - 5),
-        "CSR_min_up2":    lambda: c.update(CSR_min=c.get("CSR_min", 60) + 2),
+        "CRI_max_up2":    lambda: c.update(CRI_max=c.get("CRI_max", 38) + 2),
+        "CRI_max_up5":    lambda: c.update(CRI_max=c.get("CRI_max", 38) + 5),
+        "CRI_max_down2":  lambda: c.update(CRI_max=c.get("CRI_max", 38) - 2),
+        "CSR_min_down2":  lambda: c.update(CSR_min=c.get("CSR_min", 43) - 2),
+        "CSR_min_down5":  lambda: c.update(CSR_min=c.get("CSR_min", 43) - 5),
+        "CSR_min_up2":    lambda: c.update(CSR_min=c.get("CSR_min", 43) + 2),
         "M10_max_up1":    lambda: c.update(M10_max=c.get("M10_max", 8) + 1),
         "M25_min_down2":  lambda: c.update(M25_min=c.get("M25_min", 85) - 2),
         "Ad_max_up1":     lambda: c.update(Ad_max=c.get("Ad_max", 13) + 1),
-        "add_CRI_max_30": lambda: c.update(CRI_max=30),
-        "add_CSR_min_60": lambda: c.update(CSR_min=60),
+        "add_CRI_max_38": lambda: c.update(CRI_max=38),
+        "add_CSR_min_43": lambda: c.update(CSR_min=43),
         "add_Ad_max_13":  lambda: c.update(Ad_max=13),
         "clear_all":      lambda: c.clear(),
     }
@@ -159,6 +161,79 @@ def _apply_adjustment(constraints: dict, adjust_key: str) -> dict:
     if fn:
         fn()
     return c
+
+
+# ── 煤种预筛选 ───────────────────────────────────────────────────
+
+def _preselect_coals(coal_props: dict, constraints: dict, max_n: int = 20) -> tuple[list[str], str]:
+    """
+    从大量煤种中智能筛选出最适合参与优化的候选煤。
+    筛选策略：
+    1. 排除数据不完整的煤种（缺少价格、CRI、CSR）
+    2. 根据约束条件筛选（CRI/CSR 在合理范围内的煤）
+    3. 按价格+质量综合排序，取 top-N
+    返回 (selected_names, filter_description)
+    """
+    import numpy as np
+
+    # Step 1: 排除数据不完整的煤种
+    valid = {}
+    for name, p in coal_props.items():
+        price = p.get("price", 0)
+        cri = p.get("coke_CRI", 0)
+        csr = p.get("coke_CSR", 0)
+        # 必须有价格和至少一个质量指标
+        if price > 0 and (cri > 0 or csr > 0):
+            valid[name] = p
+
+    if not valid:
+        # 如果没有完整数据的煤，返回所有煤（兜底）
+        names = list(coal_props.keys())[:max_n]
+        return names, f"数据不完整，取前 {len(names)} 种"
+
+    # Step 2: 根据约束条件初步筛选
+    cri_max = constraints.get("CRI_max", 999)
+    csr_min = constraints.get("CSR_min", 0)
+    filtered = {}
+    for name, p in valid.items():
+        cri = p.get("coke_CRI", 0)
+        csr = p.get("coke_CSR", 0)
+        # 宽松筛选：单种煤的 CRI 不能太高（留 20% 余量），CSR 不能太低
+        if cri <= cri_max * 1.3 and csr >= csr_min * 0.7:
+            filtered[name] = p
+
+    # 如果筛选太严导致数量不足，放宽回 valid
+    if len(filtered) < 5:
+        filtered = valid
+
+    filter_info_parts = [f"有完整数据 {len(valid)} 种"]
+    if len(filtered) < len(valid):
+        filter_info_parts.append(f"约束粗筛后 {len(filtered)} 种")
+
+    # Step 3: 如果数量已经合理，直接返回
+    if len(filtered) <= max_n:
+        filter_info = "→".join(filter_info_parts)
+        return list(filtered.keys()), filter_info
+
+    # Step 4: 按综合得分排序取 top-N
+    # 得分 = 0.4×低价格 + 0.3×低CRI + 0.3×高CSR（归一化后）
+    names = list(filtered.keys())
+    prices = np.array([filtered[n].get("price", 0) for n in names])
+    cris = np.array([filtered[n].get("coke_CRI", 50) for n in names])
+    csrs = np.array([filtered[n].get("coke_CSR", 50) for n in names])
+
+    def _norm(arr):
+        r = arr.max() - arr.min()
+        return (arr - arr.min()) / r if r > 0 else np.zeros_like(arr)
+
+    # 越低越好的用 1 - norm，越高越好的用 norm
+    score = 0.4 * (1 - _norm(prices)) + 0.3 * (1 - _norm(cris)) + 0.3 * _norm(csrs)
+    top_idx = np.argsort(score)[-max_n:][::-1]
+    selected = [names[i] for i in top_idx]
+
+    filter_info_parts.append(f"综合排序取 Top-{max_n}")
+    filter_info = " → ".join(filter_info_parts)
+    return selected, filter_info
 
 
 # ── 进度条辅助 ───────────────────────────────────────────────────
@@ -171,6 +246,14 @@ class ProgressTracker:
 
     def add(self, text: str, pct: int = 0) -> None:
         self.steps.append({'text': text, 'done': False, 'pct': pct, 'details': []})
+
+    def update(self, text: str = None, pct: int = None) -> None:
+        """更新当前步骤的文字和百分比（用于心跳更新）。"""
+        if self.steps:
+            if text:
+                self.steps[-1]['text'] = text
+            if pct is not None:
+                self.steps[-1]['pct'] = pct
 
     def detail(self, text: str) -> None:
         if self.steps:
@@ -185,6 +268,7 @@ class ProgressTracker:
                 self.steps[-1]['pct'] = pct
 
     def html(self) -> str:
+        """返回进度条 HTML，用 __PG__ / __/PG__ 标记包裹，便于前端分割。"""
         lines = ['<div class="pipeline-progress">']
         for step in self.steps:
             icon = '✅' if step.get('done') else '⏳'
@@ -208,8 +292,36 @@ class ProgressTracker:
             lines.append(f'<div class="progress-pct-done">✅ 完成</div>')
         else:
             lines.append(f'<div class="progress-pct">{pct}%</div>')
-        lines.append('</div>\n\n')
-        return ''.join(lines)
+        lines.append('</div>')
+        body = ''.join(lines)
+        return f'\n__PG__{body}__/PG__\n'
+
+
+async def _run_with_heartbeat(func, p: ProgressTracker, label: str,
+                              pct_start: int, pct_end: int,
+                              *args, interval: int = 3, **kwargs):
+    """
+    在线程中运行阻塞函数，同时每 interval 秒 yield 一次心跳进度更新。
+    进度百分比从 pct_start 线性增长到 pct_end。
+
+    用法：
+        async for html in _run_with_heartbeat(some_func, p, "正在优化…", 30, 60, arg1, arg2):
+            yield html
+        result = p._heartbeat_result  # 获取函数返回值
+    """
+    import concurrent.futures
+    loop = asyncio.get_event_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        future = loop.run_in_executor(pool, lambda: func(*args, **kwargs))
+        elapsed = 0
+        while not future.done():
+            await asyncio.sleep(interval)
+            elapsed += interval
+            # 百分比从 pct_start 缓慢增长到 pct_end，永远不超过 pct_end
+            progress = min(pct_start + int((pct_end - pct_start) * (1 - 1 / (1 + elapsed / 15))), pct_end - 1)
+            p.update(f"{label}（{elapsed}s）", pct=progress)
+            yield p.html()
+        p._heartbeat_result = future.result()
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -280,20 +392,34 @@ async def process_question(question: str, session_id: str = "") -> AsyncGenerato
 # ══════════════════════════════════════════════════════════════════
 
 async def _optimization_step1(question: str, session_id: str, p: ProgressTracker):
-    """Step 1: 提取约束 → 展示给用户确认。"""
+    """Step 1: 提取约束 → 智能筛选煤种 → 展示给用户确认。"""
     p.add("调度员：正在分析配煤需求…", pct=15)
-    p.detail(f'<span class="agent-name">调度员</span> <span class="tool-call">调用 Skill: extract_constraints()</span> 提取约束条件')
     yield p.html()
     await asyncio.sleep(0)
 
-    constraints = await asyncio.to_thread(extract_constraints, question)
-    coal_props = await asyncio.to_thread(get_coal_props)
-    coal_names = list(coal_props.keys())
+    try:
+        constraints = await asyncio.to_thread(extract_constraints, question)
+        logger.info(f"约束提取完成: {constraints}")
+    except Exception as e:
+        logger.error(f"约束提取异常: {e}", exc_info=True)
+        yield f"约束提取失败: {e}"
+        return
 
-    p.detail(f'<span class="agent-name">调度员</span> <span class="tool-result">约束条件: {json.dumps(constraints, ensure_ascii=False)}</span>')
-    p.detail(f'<span class="agent-name">调度员</span> <span class="tool-result">可用煤种: {len(coal_names)} 种</span>')
+    try:
+        coal_props = await asyncio.to_thread(get_coal_props)
+        all_coal_names = list(coal_props.keys())
+        logger.info(f"煤种加载完成: {len(all_coal_names)} 种")
+    except Exception as e:
+        logger.error(f"煤种加载异常: {e}", exc_info=True)
+        yield f"煤种加载失败: {e}"
+        return
+
     p.finish("调度员：需求分析完成", pct=20)
     yield p.html()
+
+    # ── 智能筛选候选煤种（从858种筛到合理数量） ──
+    import numpy as np
+    selected_names, filter_info = _preselect_coals(coal_props, constraints, max_n=12)
 
     # 格式化约束条件展示
     constraint_display = []
@@ -311,7 +437,7 @@ async def _optimization_step1(question: str, session_id: str, p: ProgressTracker
         constraint_display.append("- （未检测到明确约束，将使用默认参数优化）")
 
     # 生成煤样数据可视化
-    p.add("调度员：正在生成煤样数据报表…", pct=25)
+    p.add("调度员：正在生成数据报表…", pct=25)
     yield p.html()
     await asyncio.sleep(0)
 
@@ -322,20 +448,34 @@ async def _optimization_step1(question: str, session_id: str, p: ProgressTracker
     p.finish("调度员：数据报表生成完成", pct=30)
     yield p.html()
 
-    # 煤样统计摘要
-    import numpy as np
-    cri_vals = [float(r.get("coke_CRI") or 0) for r in rows if r.get("coke_CRI")]
-    csr_vals = [float(r.get("coke_CSR") or 0) for r in rows if r.get("coke_CSR")]
-    ad_vals = [float(r.get("coal_ad") or 0) for r in rows if r.get("coal_ad")]
+    # 煤样统计摘要（仅对筛选后的煤种）
+    sel_props = {n: coal_props[n] for n in selected_names}
+    cri_vals = [p["coke_CRI"] for p in sel_props.values() if p.get("coke_CRI")]
+    csr_vals = [p["coke_CSR"] for p in sel_props.values() if p.get("coke_CSR")]
+
+    # 候选煤种明细表
+    coal_table_lines = []
+    for name in selected_names:
+        cp = coal_props[name]
+        coal_table_lines.append(
+            f"| {name} | {cp.get('price', 0):.0f} | {cp.get('coke_CRI', 0):.1f} | "
+            f"{cp.get('coke_CSR', 0):.1f} | {cp.get('Ad', 0):.1f} | {cp.get('G', 0):.0f} |"
+        )
+    coal_table = (
+        "| 煤种 | 价格(元/吨) | CRI | CSR | 灰分Ad | 粘结指数G |\n"
+        "|------|-----------|-----|-----|--------|----------|\n"
+        + "\n".join(coal_table_lines)
+    )
 
     msg = (
         f"我分析了你的需求，以下是我理解到的信息：\n\n"
         f"**约束条件：**\n"
         f"{''.join(c + chr(10) for c in constraint_display)}\n"
-        f"**煤样数据库概况：** 共 {len(rows)} 条煤样\n"
+        f"**煤种筛选：** 从 {len(all_coal_names)} 种煤中筛选出 **{len(selected_names)}** 种候选煤\n"
+        f"- 筛选依据：{filter_info}\n"
         f"- CRI 范围：{min(cri_vals):.1f} ~ {max(cri_vals):.1f}，均值 {np.mean(cri_vals):.1f}\n"
-        f"- CSR 范围：{min(csr_vals):.1f} ~ {max(csr_vals):.1f}，均值 {np.mean(csr_vals):.1f}\n"
-        f"- 灰分 Ad 范围：{min(ad_vals):.1f} ~ {max(ad_vals):.1f}，均值 {np.mean(ad_vals):.1f}\n\n"
+        f"- CSR 范围：{min(csr_vals):.1f} ~ {max(csr_vals):.1f}，均值 {np.mean(csr_vals):.1f}\n\n"
+        f"**候选煤种详情：**\n\n{coal_table}\n\n"
     )
 
     yield _agent_message("调度员", msg)
@@ -351,22 +491,24 @@ async def _optimization_step1(question: str, session_id: str, p: ProgressTracker
     yield '📥 下载完整煤样数据 (Excel)</a>\n\n'
 
     confirm_msg = (
+        f"以上 **{len(selected_names)} 种煤**将参与配煤优化。"
         f"确认后，**配煤工程师** 将生成 3 个方案（成本最优 / 质量最优 / 均衡），"
-        f"**质量分析师** 使用 RF + CNN 双模型预测各方案炼焦后的焦炭质量。\n\n"
-        f"确认开始，还是需要补充条件？"
+        f"**质量分析师** 使用多模型预测各方案焦炭质量。\n\n"
+        f"请确认，或补充条件 / 指定煤种。"
     )
 
-    # 保存状态
+    # 保存状态（只保存筛选后的煤种）
     state.save(session_id, {
         "stage": "confirm_constraints",
         "question": question,
         "constraints": constraints,
-        "coal_names": coal_names,
+        "coal_names": selected_names,
     })
 
     yield _agent_message("调度员", confirm_msg, [
         {"label": "确认，开始优化", "action": "__AGENT:confirm_blend__", "style": "primary"},
         {"label": "我要补充条件", "action": "__AGENT:add_constraints__", "style": "default"},
+        {"label": "用全部煤种优化（慢）", "action": "__AGENT:use_all_coals__", "style": "default"},
     ])
 
 
@@ -384,22 +526,26 @@ async def _optimization_step2_generate(session_id: str, p: ProgressTracker,
     round_num = s.get("round_num", 0) + 1
     coal_props = await asyncio.to_thread(get_coal_props)
 
-    # ── 配煤工程师生成方案 ──
-    if not is_retry:
-        p.add("配煤工程师：正在生成配煤方案…", pct=25)
-        p.detail(f'<span class="agent-name">配煤工程师</span> <span class="tool-call">调用 Skill: run_multi_strategy_blend()</span>')
-    else:
-        p.add(f"配煤工程师：根据质量分析师反馈调整方案（第 {round_num} 轮）…", pct=30)
-        p.detail(f'<span class="agent-name">配煤工程师</span> <span class="tool-call">第 {round_num} 轮：根据反馈调整配煤比例</span>')
+    # ── 配煤工程师生成方案（带心跳） ──
+    blend_label = f"配煤工程师：正在生成配煤方案（第 {round_num} 轮）…" if is_retry else "配煤工程师：正在生成配煤方案…"
+    p.add(blend_label, pct=25)
     yield p.html()
     await asyncio.sleep(0)
 
     if not is_retry or adjustment_hint is None:
-        plans = await asyncio.to_thread(run_multi_strategy_blend, coal_names, constraints)
+        async for html in _run_with_heartbeat(
+            run_multi_strategy_blend, p, "配煤工程师：差分进化优化中…", 25, 45,
+            coal_names, constraints,
+        ):
+            yield html
+        plans = p._heartbeat_result
     else:
-        plans = await asyncio.to_thread(
-            optimize_with_feedback, coal_props, coal_names, constraints, adjustment_hint
-        )
+        async for html in _run_with_heartbeat(
+            optimize_with_feedback, p, "配煤工程师：根据反馈重新优化中…", 25, 45,
+            coal_props, coal_names, constraints, adjustment_hint,
+        ):
+            yield html
+        plans = p._heartbeat_result
 
     if not plans:
         p.finish("配煤工程师：未找到可行方案", pct=50)
@@ -409,28 +555,35 @@ async def _optimization_step2_generate(session_id: str, p: ProgressTracker,
         ])
         return
 
-    p.detail(f'<span class="agent-name">配煤工程师</span> <span class="tool-result">生成了 {len(plans)} 个方案</span>')
     p.finish(f"配煤工程师：生成了 {len(plans)} 个方案", pct=45)
     yield p.html()
     await asyncio.sleep(0)
 
-    # ── 质量分析师多模型评估 ──
+    # ── 质量分析师多模型评估（逐方案带心跳） ──
     models_list = quality_agent.available_models()
     models_str = ", ".join(models_list)
-    p.add(f"质量分析师：多模型竞赛评估中…", pct=55)
-    p.detail(f'<span class="agent-name">质量分析师</span> <span class="tool-call">启动多模型竞赛: {models_str}</span>')
-    yield p.html()
-    await asyncio.sleep(0)
 
     evaluated = []
     any_passed = False
     worst_hint = None
 
-    for plan in plans:
-        result = await asyncio.to_thread(
-            quality_agent.run_multi_model,
+    for i, plan in enumerate(plans):
+        strategy_name = plan.get("strategy_name", f"方案{i+1}")
+        pct_base = 45 + int(i * 30 / len(plans))
+        pct_next = 45 + int((i + 1) * 30 / len(plans))
+        p.add(f"质量分析师：评估 {strategy_name}（{models_str}）…", pct=pct_base)
+        yield p.html()
+        await asyncio.sleep(0)
+
+        async for html in _run_with_heartbeat(
+            quality_agent.run_multi_model, p,
+            f"质量分析师：{strategy_name} 多模型预测中…",
+            pct_base, pct_next,
             blend_result=plan, coal_props=coal_props, constraints=constraints,
-        )
+        ):
+            yield html
+        result = p._heartbeat_result
+
         evaluated.append({
             "plan": plan,
             "multi_model": result,
@@ -444,16 +597,18 @@ async def _optimization_step2_generate(session_id: str, p: ProgressTracker,
             any_passed = True
         elif result.get("adjustment_hint"):
             worst_hint = result["adjustment_hint"]
+        p.finish(f"质量分析师：{strategy_name} 评估完成", pct=pct_next)
+        yield p.html()
 
     passed_count = sum(1 for e in evaluated if e["evaluation"]["passed"])
-    p.detail(f'<span class="agent-name">质量分析师</span> <span class="tool-result">多模型评估完成: {passed_count}/{len(evaluated)} 达标</span>')
-    p.finish(f"质量分析师：焦炭质量评估完成，{passed_count}/{len(evaluated)} 达标", pct=75)
+    p.finish(f"质量分析师：全部评估完成，{passed_count}/{len(evaluated)} 达标", pct=75)
     yield p.html()
 
-    # ── 展示方案卡片 ──
+    # ── 展示方案卡片 + 可视化图表 ──
     yield "\n---\n\n## 配煤方案对比\n\n"
     for ep in evaluated:
         yield _format_plan_card_v2(ep)
+        yield _plan_chart_tag(ep, constraints)
 
     # ── 保存状态 + 生成按钮 ──
     state.save(session_id, {
@@ -529,20 +684,22 @@ async def _optimization_step3_finalize(session_id: str, chosen_strategy: str, p:
     evaluation = chosen["evaluation"]
 
     p.add("报告撰写员：正在生成最终报告…", pct=85)
-    p.detail(f'<span class="agent-name">报告撰写员</span> 用户选择了方案 {chosen_strategy}: {plan.get("strategy_name", "?")}')
     yield p.html()
     await asyncio.sleep(0)
 
     # 生成详细报告
     from .coal_agent.agent_runner import _generate_summary
     card_text = _format_plan_card_v2(chosen) if "all_predictions" in chosen else _format_plan_card(plan, prediction, evaluation)
-    summary = await asyncio.to_thread(_generate_summary, question, card_text)
+    async for html in _run_with_heartbeat(_generate_summary, p, "报告撰写员：生成分析报告中…", 85, 98, question, card_text):
+        yield html
+    summary = p._heartbeat_result
 
     p.finish("报告撰写员：最终报告生成完成", pct=100)
     yield p.html()
 
     yield "\n---\n\n## 最终推荐方案\n\n"
     yield card_text
+    yield _plan_chart_tag(chosen, s.get("constraints", {}))
     if summary:
         yield "\n---\n\n## 智能分析\n\n"
         yield summary
@@ -613,6 +770,23 @@ async def _handle_agent_command(command: str, session_id: str):
         yield _agent_message("调度员", f"已调整约束为：{new_desc}，正在重新优化…")
         async for piece in _optimization_step2_generate(session_id, p):
             yield piece
+
+    elif command == "__AGENT:use_all_coals__":
+        # 用户选择用全部煤种优化（警告会很慢）
+        state_data = state.load(session_id)
+        if not state_data:
+            yield "操作已过期，请重新提问。"
+            return
+        coal_props = await asyncio.to_thread(get_coal_props)
+        all_names = list(coal_props.keys())
+        state_data["coal_names"] = all_names
+        state.save(session_id, state_data)
+        yield _agent_message(
+            "调度员",
+            f"已切换为全部 {len(all_names)} 种煤参与优化。\n\n"
+            f"⚠️ **注意：** 煤种数量较大，优化可能需要较长时间（数分钟），请耐心等待。",
+            [{"label": "确认，开始优化", "action": "__AGENT:confirm_blend__", "style": "primary"}],
+        )
 
     elif command == "__AGENT:auto_retry__":
         # 质量分析师自动调整再试
@@ -731,6 +905,32 @@ async def _handle_agent_command(command: str, session_id: str):
 
 # ── 格式化工具 ───────────────────────────────────────────────────
 
+def _plan_chart_tag(ep: dict, constraints: dict = None) -> str:
+    """为配煤方案生成 ECharts 仪表盘嵌入标记（饼图 + CRI/CSR 仪表盘）。"""
+    plan = ep["plan"]
+    strategy = plan.get("strategy", "?")
+    name = plan.get("strategy_name", "方案")
+
+    hoppers = [h for h in plan.get("hoppers", []) if h["ratio"] > 0.1]
+
+    # 获取推荐模型的预测值
+    all_preds = ep.get("all_predictions", {})
+    recommended = ep.get("recommended_model", "")
+    pred = all_preds.get(recommended) or ep.get("prediction", {})
+
+    desc = {
+        "chartType": "blend_dashboard",
+        "title": f"方案{strategy}: {name}",
+        "pieData": [{"name": h["coal"], "value": round(h["ratio"], 1)} for h in hoppers],
+        "costPerTon": round(plan.get("cost_per_ton", 0), 1),
+        "predictions": {k: round(v, 2) for k, v in pred.items() if isinstance(v, (int, float))},
+        "constraints": constraints or {},
+        "recommended_model": recommended,
+        "passed": ep.get("evaluation", {}).get("passed", False),
+    }
+    return f'\n\n<!--ECHART:{json.dumps(desc, ensure_ascii=False)}-->\n\n'
+
+
 def _format_plan_card(plan: dict, prediction: dict, evaluation: dict,
                       cnn_prediction: dict = None) -> str:
     """将单个方案格式化为 Markdown 卡片（含 RF + CNN 双模型预测）。"""
@@ -828,50 +1028,64 @@ def _format_plan_card_v2(ep: dict) -> str:
 # ══════════════════════════════════════════════════════════════════
 
 async def _knowledge_qa(question: str, question_type: str, label: str, p: ProgressTracker):
-    """知识问答：文献研究员 + 推理专家 + 报告撰写员。"""
+    """知识问答：文献研究员 + 推理专家 + 报告撰写员（逐步流式进度）。"""
     p.detail(f'<span class="agent-name">调度员</span> <span class="agent-decision">路由到知识问答链: 文献研究员 → 推理专家 → 报告撰写员</span>')
 
-    # ── 文献研究员 ─────────────────────────────────────────────
-    p.add("文献研究员：正在检索…", pct=15)
-    p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-call">调用 Skill: translate_and_extract()</span> 提取关键词')
-    p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-call">调用 Skill: search_literature()</span> 检索 ChromaDB 文献库')
-    p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-call">调用 Skill: search_knowledge_graph()</span> 查询 Neo4j 知识图谱')
+    # ── 文献研究员 Step 1: 关键词提取与翻译 ────────────────────
+    p.add("文献研究员：正在提取关键词并翻译…", pct=10)
     yield p.html()
     await asyncio.sleep(0)
 
-    research_result = await asyncio.to_thread(
-        research_agent.run, question=question, on_progress=lambda desc: None,
-    )
+    async for html in _run_with_heartbeat(translate_and_extract, p, "文献研究员：关键词提取中…", 10, 20, question):
+        yield html
+    translated = p._heartbeat_result
+    english_queries = translated["english_queries"]
+    key_concepts = translated["key_concepts"]
 
-    chunks = research_result["chunks"]
-    kg_context = research_result["kg_context"]
-    key_concepts = research_result["key_concepts"]
-
-    p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-result">关键词: {", ".join(key_concepts[:5])}</span>')
-    p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-result">命中 {len(chunks)} 条文献</span>')
-    if chunks:
-        top = chunks[0]
-        score_pct = f"{top.score:.0%}" if top.score <= 1 else f"{top.score:.2f}"
-        p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-result">最佳匹配: 「{top.title[:40]}」相关度 {score_pct}</span>')
-    if kg_context:
-        kg_lines = kg_context.strip().split("\n")
-        p.detail(f'<span class="agent-name">文献研究员</span> <span class="tool-result">知识图谱: {len(kg_lines)} 条关联</span>')
-
-    p.finish(f"文献研究员：检索到 {len(chunks)} 条文献", pct=45)
+    p.finish("文献研究员：关键词提取完成", pct=20)
     yield p.html()
     await asyncio.sleep(0)
 
-    # ── 推理专家 ───────────────────────────────────────────────
+    # ── 文献研究员 Step 2: 向量数据库检索 ──────────────────────
+    p.add("文献研究员：正在检索文献库…", pct=25)
+    yield p.html()
+    await asyncio.sleep(0)
+
+    async for html in _run_with_heartbeat(search_literature, p, "文献研究员：检索文献中…", 25, 35, english_queries):
+        yield html
+    chunks = p._heartbeat_result
+
+    p.finish(f"文献研究员：检索到 {len(chunks)} 条文献", pct=35)
+    yield p.html()
+    await asyncio.sleep(0)
+
+    # ── 文献研究员 Step 3: 知识图谱查询 ────────────────────────
+    p.add("文献研究员：正在查询知识图谱…", pct=38)
+    yield p.html()
+    await asyncio.sleep(0)
+
+    async for html in _run_with_heartbeat(search_knowledge_graph, p, "文献研究员：知识图谱查询中…", 38, 45, key_concepts):
+        yield html
+    kg_context = p._heartbeat_result
+
+    p.finish("文献研究员：检索完成", pct=45)
+    yield p.html()
+    await asyncio.sleep(0)
+
+    # ── 推理专家（带心跳进度） ─────────────────────────────────
     reasoning_trace = ""
     if is_complex(question_type) and chunks:
         p.add("推理专家：正在深度推理…", pct=50)
-        p.detail(f'<span class="agent-name">推理专家</span> <span class="agent-decision">启动 ESCARGOT 深度推理</span>')
         yield p.html()
         await asyncio.sleep(0)
 
-        reasoning_result = await asyncio.to_thread(
-            reasoning_agent.run, question=question, timeout=60, on_progress=lambda desc: None,
-        )
+        async for html in _run_with_heartbeat(
+            deep_reasoning, p, "推理专家：ESCARGOT 深度推理中…", 50, 78,
+            question, timeout=60, num_strategies=2,
+        ):
+            yield html
+        reasoning_result = p._heartbeat_result
+
         reasoning_trace = reasoning_result["reasoning_trace"]
         if reasoning_result["success"]:
             p.finish("推理专家：深度推理完成", pct=80)
@@ -976,18 +1190,19 @@ async def _data_management(question: str, session_id: str, p: ProgressTracker):
     import deepcoke.skills.coal_skills as cs
 
     p.add("数据管理员：正在解析指令…", pct=20)
-    p.detail(f'<span class="agent-name">数据管理员</span> <span class="tool-call">调用 LLM 提取数据操作</span>')
     yield p.html()
     await asyncio.sleep(0)
 
     # 用 LLM 从自然语言提取结构化数据
     try:
-        raw = await asyncio.to_thread(
-            chat_json,
+        async for html in _run_with_heartbeat(
+            chat_json, p, "数据管理员：LLM 解析中…", 20, 38,
             [{"role": "system", "content": _DATA_EXTRACT_PROMPT},
              {"role": "user", "content": question}],
             temperature=0.0,
-        )
+        ):
+            yield html
+        raw = p._heartbeat_result
         # 清理可能的 markdown 包裹
         raw = raw.strip()
         if raw.startswith("```"):

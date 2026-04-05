@@ -37,7 +37,7 @@ _DATA_MGMT_KEYWORDS = re.compile(
 )
 
 _OPTIMIZATION_KEYWORDS = re.compile(
-    r"配煤|配比|优化配|煤种"
+    r"配煤|配比|优化配"
     r"|预测.*(?:CRI|CSR|质量)|(?:CRI|CSR|M10|M25).*(?:大于|小于|范围|要求|限制|预测)"
     r"|成本最低|最优方案|混合比例|配方|料斗|blend|opti"
     r"|哪些煤|可用.*煤|列.*煤"
