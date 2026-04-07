@@ -10,14 +10,26 @@
         </div>
       </div>
       <div class="header-right">
-        <span class="user-name">{{ userName }}</span>
-        <button class="logout-btn" @click="logout">
+        <!-- 已登录：显示用户名 + 退出 -->
+        <template v-if="isLoggedIn">
+          <span class="user-name">{{ userName }}</span>
+          <button class="logout-btn" @click="logout">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            退出
+          </button>
+        </template>
+        <!-- 未登录：显示登录按钮 -->
+        <button v-else class="login-btn" @click="goLogin">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-            <polyline points="16 17 21 12 16 7"/>
-            <line x1="21" y1="12" x2="9" y2="12"/>
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+            <polyline points="10 17 15 12 10 7"/>
+            <line x1="15" y1="12" x2="3" y2="12"/>
           </svg>
-          退出
+          登录
         </button>
       </div>
     </header>
@@ -125,7 +137,6 @@ export default {
   name: 'LandingPage',
   data () {
     return {
-      userName: window.sessionStorage.getItem('nickname') || window.sessionStorage.getItem('username') || 'user',
       products: [
         {
           id: 'blend',
@@ -174,6 +185,14 @@ export default {
       ]
     }
   },
+  computed: {
+    isLoggedIn () {
+      return !!window.sessionStorage.getItem('token')
+    },
+    userName () {
+      return window.sessionStorage.getItem('nickname') || window.sessionStorage.getItem('username') || ''
+    }
+  },
   methods: {
     enterChat () {
       this.$router.push({ name: 'MainDia', params: { sessionId: 'new' } })
@@ -185,9 +204,14 @@ export default {
         query: { q: question }
       })
     },
+    goLogin () {
+      this.$router.push('/login')
+    },
     logout () {
       window.sessionStorage.removeItem('token')
-      this.$router.push('/login')
+      window.sessionStorage.removeItem('username')
+      window.sessionStorage.removeItem('nickname')
+      this.$router.go(0)
     }
   }
 }
@@ -289,6 +313,7 @@ export default {
   font-family: 'Noto Sans SC', sans-serif;
 }
 
+.login-btn,
 .logout-btn {
   background: transparent;
   border: 1px solid @dark-border;

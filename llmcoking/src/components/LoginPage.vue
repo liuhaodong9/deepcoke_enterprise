@@ -331,7 +331,7 @@ export default {
               ctx.beginPath()
               ctx.moveTo(particles[i].x, particles[i].y)
               ctx.lineTo(particles[j].x, particles[j].y)
-              ctx.strokeStyle = `rgba(255, 255, 255, ${0.12 * (1 - dist / LINK_DIST)})`
+              ctx.strokeStyle = `rgba(0, 0, 0, ${0.1 * (1 - dist / LINK_DIST)})`
               ctx.lineWidth = 0.6
               ctx.stroke()
             }
@@ -348,7 +348,7 @@ export default {
               ctx.beginPath()
               ctx.moveTo(mouse.x, mouse.y)
               ctx.lineTo(p.x, p.y)
-              ctx.strokeStyle = `rgba(255, 255, 255, ${0.25 * (1 - dist / MOUSE_LINK_DIST)})`
+              ctx.strokeStyle = `rgba(0, 0, 0, ${0.2 * (1 - dist / MOUSE_LINK_DIST)})`
               ctx.lineWidth = 0.8
               ctx.stroke()
             }
@@ -370,7 +370,7 @@ export default {
           }
           ctx.beginPath()
           ctx.arc(p.x, p.y, radius, 0, Math.PI * 2)
-          ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`
+          ctx.fillStyle = `rgba(0, 0, 0, ${alpha})`
           ctx.fill()
         }
 
@@ -403,14 +403,14 @@ export default {
 <style lang="less" scoped>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 
-@dark: #0C0F14;
-@dark-card: #161A22;
-@dark-border: #1F2937;
-@accent: #E2E8F0;
-@accent-dim: rgba(226, 232, 240, 0.08);
-@text-bright: #F1F5F9;
+@dark: #F1F5F9;
+@dark-card: #FFFFFF;
+@dark-border: #E2E8F0;
+@accent: #1E293B;
+@accent-dim: rgba(30, 41, 59, 0.06);
+@text-bright: #1E293B;
 @text-dim: #64748B;
-@text-muted: #475569;
+@text-muted: #94A3B8;
 
 .login_container {
   display: flex;
@@ -430,8 +430,8 @@ export default {
   padding: 60px;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 80% 60% at 20% 80%, rgba(255, 255, 255, 0.03) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 70% 20%, rgba(255, 255, 255, 0.02) 0%, transparent 50%),
+    radial-gradient(ellipse 80% 60% at 20% 80%, rgba(0, 0, 0, 0.03) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 70% 20%, rgba(0, 0, 0, 0.02) 0%, transparent 50%),
     @dark;
 }
 
@@ -448,8 +448,8 @@ export default {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+    linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
   background-size: 60px 60px;
   pointer-events: none;
   z-index: 0;
@@ -470,7 +470,7 @@ export default {
   letter-spacing: 3px;
   color: @accent;
   background: @accent-dim;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.12);
   padding: 4px 14px;
   border-radius: 4px;
   margin-bottom: 28px;
@@ -543,7 +543,7 @@ export default {
   border-radius: 50%;
   background: @accent;
   flex-shrink: 0;
-  box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.2);
 }
 
 .brand-footer {
@@ -559,7 +559,7 @@ export default {
     height: 28px;
     width: auto;
     opacity: 0.4;
-    filter: grayscale(1) brightness(2);
+    filter: grayscale(1) brightness(0.6);
   }
 
   span {
@@ -621,7 +621,7 @@ export default {
 }
 
 ::v-deep .el-input__inner {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(0, 0, 0, 0.02);
   border: 1px solid @dark-border;
   color: @text-bright;
   border-radius: 8px;
@@ -635,9 +635,9 @@ export default {
   }
 
   &:focus {
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(255, 255, 255, 0.06);
-    box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.05);
+    border-color: rgba(0, 0, 0, 0.2);
+    background: rgba(0, 0, 0, 0.03);
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.04);
   }
 }
 
@@ -705,7 +705,7 @@ export default {
 
   &:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 8px 24px rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   }
 
   &:active:not(:disabled) {
@@ -729,7 +729,7 @@ export default {
 .spinner {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(12, 15, 20, 0.3);
+  border: 2px solid rgba(241, 245, 249, 0.3);
   border-top-color: @dark;
   border-radius: 50%;
   animation: spin 0.6s linear infinite;

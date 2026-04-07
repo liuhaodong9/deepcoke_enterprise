@@ -71,13 +71,13 @@ def generate_answer_stream(question: str, evidence_text: str,
                             ref_num = f"[{r['num']}]"
                             break
                     caption = fig.get("caption", "")
-                    caption_html = f'<br><span style="color:#e2e8f0;font-size:13px;">{caption}</span>' if caption else ""
+                    caption_html = f'<br><span style="color:#334155;font-size:13px;">{caption}</span>' if caption else ""
                     fig_parts.append(
-                        f'<div style="margin:12px 0;padding:10px;background:#1e293b;border:1px solid #334155;border-radius:8px;">'
+                        f'<div style="margin:12px 0;padding:10px;background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;">'
                         f'<img src="{fig["url"]}" alt="文献图 {ref_num} p.{fig["page"]}" '
                         f'style="max-width:100%;border-radius:4px;">'
                         f'{caption_html}'
-                        f'<br><small style="color:#64748b;">来源：{ref_num} 第{fig["page"]}页</small>'
+                        f'<br><small style="color:#94A3B8;">来源：{ref_num} 第{fig["page"]}页</small>'
                         f'</div>\n\n'
                     )
                 yield "".join(fig_parts)

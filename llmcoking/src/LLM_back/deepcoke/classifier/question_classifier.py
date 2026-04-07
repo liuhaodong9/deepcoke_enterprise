@@ -6,6 +6,8 @@ from ..llm_client import chat_json
 
 # Question types and their descriptions
 QUESTION_TYPES = {
+    "coal_price": "asking about coal market prices, trading prices, or price quotes",
+    "oven_control": "loading coal blend into coke oven, starting digital twin monitoring, or oven operations",
     "optimization": "asking to optimize coal blending ratios, predict coke quality (CRI/CSR), or find best blend",
     "data_management": "adding, updating, deleting, or querying coal sample data in the database",
     "factual": "asking for a specific fact, definition, or value",
@@ -22,6 +24,21 @@ COMPLEX_TYPES = {"comparison", "causal", "recommendation"}
 SIMPLE_RAG_TYPES = {"factual", "process"}
 
 # ── 关键词优先匹配（不依赖 LLM，速度快且稳定）──────────────────
+
+# 煤价查询（必须在 optimization 之前匹配）
+_COAL_PRICE_KEYWORDS = re.compile(
+    r"成交价|煤价|报价|行情|市场价|今日.*价|价格查询|煤炭.*价格|焦煤.*价格",
+    re.IGNORECASE,
+)
+
+# 焦炉操作 / 数字孪生监控
+_OVEN_CONTROL_KEYWORDS = re.compile(
+    r"填入.*焦炉|装入.*焦炉|焦炉.*装|焦炉.*填"
+    r"|开启.*孪生|数字孪生.*监控|启动.*监控"
+    r"|开启.*监控|关闭.*监控",
+    re.IGNORECASE,
+)
+
 _DATA_MGMT_KEYWORDS = re.compile(
     r"添加.*煤|新增.*煤|录入.*煤|入库.*煤|导入.*煤"
     r"|删除.*煤|移除.*煤|去掉.*煤"
@@ -49,6 +66,8 @@ _OPTIMIZATION_KEYWORDS = re.compile(
 _CLASSIFY_PROMPT = """You are a question classifier for a coal coking domain Q&A system.
 
 Classify the user's question into EXACTLY ONE of these types:
+- coal_price: asking about coal market prices, trading prices, or price quotes (e.g. "今天焦煤价格", "澳大利亚焦煤成交价")
+- oven_control: loading coal blend into coke oven, starting/stopping digital twin monitoring, or oven operations (e.g. "填入焦炉", "开启数字孪生监控")
 - data_management: adding, updating, deleting, or querying coal sample data in the database (e.g. "添加一个煤样", "录入煤数据", "删除XX煤")
 - optimization: asking to optimize coal blending ratios, predict coke quality (CRI/CSR/M10/M25), find best blend, query available coals, or calculate blending costs
 - factual: asking for a specific fact, definition, or value
@@ -66,7 +85,11 @@ def classify_question(question: str) -> str:
     Classify a question into one of the predefined types.
     Uses keyword matching first (fast & reliable), falls back to LLM.
     """
-    # 1) 关键词快速匹配
+    # 1) 关键词快速匹配（顺序很重要：煤价 > 焦炉 > 数据管理 > 优化）
+    if _COAL_PRICE_KEYWORDS.search(question):
+        return "coal_price"
+    if _OVEN_CONTROL_KEYWORDS.search(question):
+        return "oven_control"
     if _DATA_MGMT_KEYWORDS.search(question):
         return "data_management"
     if _OPTIMIZATION_KEYWORDS.search(question):
@@ -99,4 +122,4 @@ def is_complex(question_type: str) -> bool:
 
 def needs_rag(question_type: str) -> bool:
     """Whether this question type needs RAG retrieval."""
-    return question_type not in ("general_chat", "optimization", "data_management")
+    return question_type not in ("general_chat", "optimization", "data_management", "coal_price", "oven_control")

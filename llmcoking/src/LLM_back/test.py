@@ -304,7 +304,19 @@ async def get_messages(session_id: str, db: Session = Depends(get_db)):
     return chat_history  # ✅ user 和 bot 按顺序交替返回
 
 
-# 5️⃣ **煤样数据下载（Excel）**
+# 5️⃣-a **煤样数据分页查询**
+@app.get("/all_coals_page/")
+async def all_coals_page(page: int = 1, page_size: int = 10):
+    """分页查询所有煤样数据，供前端表格展示。"""
+    from deepcoke.coal_agent.coal_db import get_all_coals
+    rows = get_all_coals()
+    total = len(rows)
+    start = (page - 1) * page_size
+    end = start + page_size
+    return {"total": total, "page": page, "page_size": page_size, "data": rows[start:end]}
+
+
+# 5️⃣-b **煤样数据下载（Excel）**
 @app.get("/download_coals/")
 async def download_coals():
     """导出所有煤样数据为 Excel 文件下载。"""

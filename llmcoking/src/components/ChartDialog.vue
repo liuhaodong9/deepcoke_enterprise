@@ -15,19 +15,19 @@
 <script>
 import * as echarts from 'echarts'
 
-// 深色主题色板
+// 浅色主题色板
 const C = {
-  bg: '#0C0F14',
-  cardBg: '#161A22',
-  border: '#334155',
-  label: '#94A3B8',
-  text: '#E2E8F0',
-  grid: '#1F2937',
-  cyan: '#38BDF8',
-  green: '#10B981',
-  gold: '#F59E0B',
-  red: '#EF4444',
-  purple: '#8B5CF6'
+  bg: '#FFFFFF',
+  cardBg: '#F8FAFC',
+  border: '#E2E8F0',
+  label: '#64748B',
+  text: '#1E293B',
+  grid: '#F1F5F9',
+  cyan: '#2563EB',
+  green: '#059669',
+  gold: '#D97706',
+  red: '#DC2626',
+  purple: '#7C3AED'
 }
 
 export default {
@@ -530,25 +530,25 @@ export default {
 
 <style>
 .chart-dialog {
-  background: #0C0F14 !important;
-  border: 1px solid #334155;
+  background: #FFFFFF !important;
+  border: 1px solid #E2E8F0;
   border-radius: 12px;
 }
 .chart-dialog .el-dialog__header {
-  background: #0C0F14;
-  border-bottom: 1px solid #1F2937;
+  background: #FFFFFF;
+  border-bottom: 1px solid #F1F5F9;
   padding: 16px 20px;
 }
 .chart-dialog .el-dialog__title {
-  color: #E2E8F0 !important;
+  color: #1E293B !important;
   font-size: 15px;
   font-weight: 600;
 }
 .chart-dialog .el-dialog__headerbtn .el-dialog__close {
-  color: #94A3B8;
+  color: #64748B;
 }
 .chart-dialog .el-dialog__body {
-  background: #0C0F14;
+  background: #FFFFFF;
   padding: 12px 16px 20px;
 }
 .chart-container {

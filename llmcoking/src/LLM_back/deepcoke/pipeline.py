@@ -354,6 +354,7 @@ async def process_question(question: str, session_id: str = "") -> AsyncGenerato
         return
 
     type_labels = {
+        "coal_price": "煤价查询", "oven_control": "焦炉操作",
         "optimization": "配煤优化", "data_management": "数据管理",
         "factual": "事实查询", "process": "工艺流程",
         "comparison": "对比分析", "causal": "因果推理",
@@ -362,6 +363,18 @@ async def process_question(question: str, session_id: str = "") -> AsyncGenerato
     label = type_labels.get(question_type, question_type)
     p.detail(f'<span class="agent-name">调度员</span> <span class="tool-result">分类结果: {label}</span>')
     p.finish(f"问题类型：{label}", pct=10)
+
+    # ══ 路由 P: 煤价查询 ═════════════════════════════════════════
+    if question_type == "coal_price":
+        async for piece in _coal_price_query(question, session_id, p):
+            yield piece
+        return
+
+    # ══ 路由 O: 焦炉操作 / 数字孪生 ════════════════════════════════
+    if question_type == "oven_control":
+        async for piece in _oven_control(question, session_id, p):
+            yield piece
+        return
 
     # ══ 路由 A: 配煤优化（交互式） ══════════════════════════════
     if question_type == "optimization":
@@ -486,8 +499,8 @@ async def _optimization_step1(question: str, session_id: str, p: ProgressTracker
 
     # 下载链接
     yield '\n\n<a href="http://127.0.0.1:8000/download_coals/" target="_blank" '
-    yield 'style="display:inline-block;padding:8px 16px;background:#1F2937;color:#38BDF8;'
-    yield 'border-radius:8px;text-decoration:none;font-size:13px;border:1px solid #334155;">'
+    yield 'style="display:inline-block;padding:8px 16px;background:#F1F5F9;color:#2563EB;'
+    yield 'border-radius:8px;text-decoration:none;font-size:13px;border:1px solid #CBD5E1;">'
     yield '📥 下载完整煤样数据 (Excel)</a>\n\n'
 
     confirm_msg = (
@@ -697,18 +710,206 @@ async def _optimization_step3_finalize(session_id: str, chosen_strategy: str, p:
     p.finish("报告撰写员：最终报告生成完成", pct=100)
     yield p.html()
 
-    yield "\n---\n\n## 最终推荐方案\n\n"
+    yield "\n\n最终推荐方案\n\n"
     yield card_text
     yield _plan_chart_tag(chosen, s.get("constraints", {}))
     if summary:
-        yield "\n---\n\n## 智能分析\n\n"
+        yield "\n\n智能分析\n\n"
         yield summary
 
-    yield _agent_message("调度员", "方案已生成。你可以继续提问，或基于此方案进一步调整。", [
+    yield _agent_message("调度员", "方案已生成。你可以将此方案填入焦炉，或进一步调整。", [
+        {"label": "填入焦炉", "action": "__AGENT:load_oven__", "style": "primary"},
         {"label": "基于此方案微调", "action": "__AGENT:add_constraints__", "style": "default"},
     ])
 
-    state.clear(session_id)
+    # 保留方案状态，供焦炉装填使用
+    state.save(session_id, {
+        "stage": "plan_finalized",
+        "chosen_plan": plan,
+        "prediction": prediction,
+        "question": question,
+    })
+
+
+# ── 煤价查询路由 ──────────────────────────────────────────────────
+
+async def _coal_price_query(question: str, session_id: str, p: ProgressTracker):
+    """煤价查询：查询今日煤炭市场行情。"""
+    import re as _re
+    from .skills.coal_price_service import get_price, get_quality_range, get_all_prices
+
+    p.add("市场分析员：正在查询今日煤炭市场行情…", pct=15)
+    yield p.html()
+    await asyncio.sleep(0.5)
+
+    # 从问题中提取煤种名称
+    coal_name = ""
+    # 常见煤种名
+    known = ["澳大利亚焦煤", "澳洲焦煤", "澳煤", "山西主焦煤", "山西焦煤",
+             "唐山肥煤", "气煤", "瘦煤", "蒙古焦煤", "蒙古煤"]
+    for name in known:
+        if name in question:
+            coal_name = name
+            break
+    if not coal_name:
+        # 尝试正则提取
+        m = _re.search(r"([\u4e00-\u9fa5]+(?:焦煤|肥煤|气煤|瘦煤|煤))", question)
+        if m:
+            coal_name = m.group(1)
+
+    if not coal_name:
+        # 返回所有煤种价格
+        p.finish("市场分析员：查询完成", pct=100)
+        yield p.html()
+        all_prices = get_all_prices()
+        lines = ["## 今日煤炭市场行情\n\n"]
+        lines.append(f"数据来源：{all_prices[0]['source']}　更新时间：{all_prices[0]['update_time']}\n\n")
+        lines.append("| 煤种 | 类型 | 产地 | 价格(元/吨) |\n|---|---|---|---|\n")
+        for p_info in all_prices:
+            lines.append(f"| {p_info['coal_name']} | {p_info['coal_type']} | {p_info['source_region']} | {p_info['price']} |\n")
+        yield "".join(lines)
+        return
+
+    # 查询指定煤种
+    price_info = get_price(coal_name)
+    quality_info = get_quality_range(coal_name)
+
+    if not price_info:
+        p.finish("市场分析员：未找到该煤种信息", pct=100)
+        yield p.html()
+        yield f"抱歉，未找到「{coal_name}」的市场数据。"
+        return
+
+    p.detail(f'<span class="agent-name">市场分析员</span> 查询到 {price_info["coal_name"]} 今日行情')
+    p.finish("市场分析员：查询完成", pct=100)
+    yield p.html()
+    await asyncio.sleep(0)
+
+    # 构建回复
+    lines = [
+        f"\n\n根据{price_info['source']}今日 {price_info['update_time']} 更新数据：\n\n",
+        f"煤种：{price_info['coal_name']}（{price_info['source_region']}）\n",
+        f"今日成交价：{price_info['price']} {price_info['unit']}\n",
+        f"煤种类型：{price_info['coal_type']}\n\n",
+    ]
+
+    if quality_info:
+        q = quality_info
+        lines.append("焦炭质量参数（作为主焦煤）\n\n")
+        lines.append(f"根据国内外科研报告及工业报告分析记录，该煤种作为{q['coal_type']}，")
+        lines.append(f"配入量在 {q['recommended_ratio']} 时：\n\n")
+        lines.append(f"CSR（热态强度）：稳定在 {q['csr_range'][0]}-{q['csr_range'][1]}\n")
+        lines.append(f"CRI（热态反应性）：稳定在 {q['cri_range'][0]}-{q['cri_range'][1]}\n")
+        if q.get("ad_range"):
+            lines.append(f"Ad（灰分）：{q['ad_range'][0]}-{q['ad_range'][1]}%\n")
+        if q.get("g_range"):
+            lines.append(f"G（粘结指数）：{q['g_range'][0]}-{q['g_range'][1]}\n")
+
+    yield "".join(lines)
+
+    # 保存状态
+    state.save(session_id, {
+        "stage": "price_queried",
+        "coal_info": price_info,
+        "quality_info": quality_info,
+    })
+
+    # 提供后续操作按钮
+    yield _agent_message("市场分析员", "是否需要根据当前煤仓储备情况制定配煤方案？", [
+        {"label": "根据煤仓制定配煤方案", "action": "__AGENT:price_to_blend__", "style": "primary"},
+    ])
+
+
+# ── 焦炉操作路由 ──────────────────────────────────────────────────
+
+async def _oven_control(question: str, session_id: str, p: ProgressTracker):
+    """焦炉操作：装填配煤方案 / 开启数字孪生监控。"""
+    import re as _re
+
+    # 判断是否是开启监控
+    if _re.search(r"开启.*(?:孪生|监控)|启动.*监控|数字孪生", question):
+        s = state.load(session_id) or {}
+        oven_id = s.get("oven_id", "1")
+
+        p.add("数字孪生控制系统：正在连接焦炉传感网络…", pct=20)
+        yield p.html()
+        await asyncio.sleep(0.5)
+
+        p.detail('<span class="agent-name">数字孪生</span> 传感器网络已连接')
+        p.finish("数字孪生控制系统：监控已启动", pct=100)
+        yield p.html()
+        await asyncio.sleep(0)
+
+        yield f"__MONITORING:start:{oven_id}__"
+        yield _agent_message(
+            "数字孪生控制系统",
+            f"{oven_id}号焦炉数字孪生监控已启动。\n\n"
+            f"后台实时监测焦化温度与压力\n"
+            f"监控画面已在右侧面板开启\n"
+            f"系统将自动预警异常波动",
+            [{"label": "关闭监控", "action": "__AGENT:stop_monitoring__", "style": "default"}],
+        )
+        return
+
+    # 否则是装填焦炉
+    # 提取焦炉号
+    m = _re.search(r"(\d+)\s*号?\s*(?:焦炉|炉)", question)
+    oven_id = m.group(1) if m else "1"
+
+    # 检查是否有已确认的配煤方案
+    s = state.load(session_id) or {}
+    plan = s.get("chosen_plan")
+
+    if not plan:
+        yield _agent_message("调度员", "当前没有待装填的配煤方案。请先制定一个配煤方案。")
+        return
+
+    p.add(f"配煤调度员：正在将配煤方案装入{oven_id}号焦炉…", pct=15)
+    yield p.html()
+    await asyncio.sleep(0.5)
+
+    p.detail(f'<span class="agent-name">配煤调度员</span> 正在计算料斗下料序列')
+    p.add(f"料斗控制系统：各料斗开始按比例下料…", pct=40)
+    yield p.html()
+    await asyncio.sleep(0.5)
+
+    # 触发配煤动画
+    yield "__VIDEO:blend__"
+
+    p.detail(f'<span class="agent-name">料斗控制</span> 配煤混合完成')
+    p.add(f"焦炉控制系统：配煤正在填入{oven_id}号焦炉…", pct=70)
+    yield p.html()
+    await asyncio.sleep(0.5)
+
+    p.finish(f"焦炉控制系统：{oven_id}号焦炉装填完成", pct=100)
+    yield p.html()
+    await asyncio.sleep(0)
+
+    # 构建装填报告
+    hoppers = plan.get("hoppers", [])
+    lines = [f"\n\n装填完成\n\n"]
+    lines.append(f"已将配煤方案成功填入 {oven_id}号焦炉。\n\n")
+    if hoppers:
+        lines.append("煤种 / 配比(%)：\n")
+        for h in hoppers:
+            lines.append(f"  {h['coal']}：{h['ratio']:.1f}%\n")
+    cost = plan.get("cost_per_ton")
+    if cost:
+        lines.append(f"\n吨焦成本：{cost:.1f} 元/吨\n")
+    lines.append(f"建议结焦时间：12小时后进行推焦\n")
+    yield "".join(lines)
+
+    # 保存状态
+    state.save(session_id, {
+        "stage": "oven_loaded",
+        "oven_id": oven_id,
+        "chosen_plan": plan,
+    })
+
+    yield _agent_message("调度员", "是否需要开启数字孪生监控？", [
+        {"label": "开启数字孪生监控", "action": "__AGENT:start_monitoring__", "style": "primary"},
+        {"label": "查看配煤详情", "action": "__AGENT:add_constraints__", "style": "default"},
+    ])
 
 
 # ── Agent 指令处理 ────────────────────────────────────────────────
@@ -718,6 +919,9 @@ async def _handle_agent_command(command: str, session_id: str):
     p = ProgressTracker()
 
     if command == "__AGENT:confirm_blend__":
+        import logging as _log
+        _s = state.load(session_id)
+        _log.warning(f"[DEBUG confirm_blend] session_id={session_id!r}, state={'EXISTS' if _s else 'NONE'}, store_keys={list(state._store.keys())}")
         async for piece in _optimization_step2_generate(session_id, p):
             yield piece
 
@@ -897,6 +1101,61 @@ async def _handle_agent_command(command: str, session_id: str):
     elif command == "__AGENT:cancel_data__":
         state.clear(session_id)
         yield _agent_message("数据管理员", "已取消操作。")
+
+    elif command == "__AGENT:price_to_blend__":
+        # 从煤价查询状态跳转到配煤优化
+        s = state.load(session_id) or {}
+        coal_info = s.get("coal_info", {})
+        coal_name = coal_info.get("coal_name", "")
+        state.clear(session_id)
+        opt_question = f"根据今天煤仓的煤种储备情况，以{coal_name}为主焦煤，制定一个配煤优化方案"
+        p = ProgressTracker()
+        p.add("调度员：转入配煤优化流程…", pct=5)
+        yield p.html()
+        async for piece in _optimization_step1(opt_question, session_id, p):
+            yield piece
+
+    elif command == "__AGENT:load_oven__":
+        # 显示焦炉选择按钮
+        s = state.load(session_id) or {}
+        if s.get("stage") != "plan_finalized":
+            yield _agent_message("调度员", "当前没有待装填的配煤方案。")
+            return
+        buttons = [
+            {"label": f"{i}号焦炉", "action": f"__AGENT:load_oven_{i}__", "style": "default"}
+            for i in range(1, 13)
+        ]
+        yield _agent_message("调度员", "请选择要装填的焦炉：", buttons)
+
+    elif command.startswith("__AGENT:load_oven_") and command.endswith("__"):
+        # 用户选择了具体焦炉号
+        import re as _re
+        m = _re.search(r"load_oven_(\d+)", command)
+        oven_id = m.group(1) if m else "1"
+        async for piece in _oven_control(f"填入{oven_id}号焦炉", session_id, ProgressTracker()):
+            yield piece
+
+    elif command == "__AGENT:start_monitoring__":
+        # 开启数字孪生监控
+        s = state.load(session_id) or {}
+        oven_id = s.get("oven_id", "1")
+        p = ProgressTracker()
+        p.add("数字孪生控制系统：正在连接传感网络…", pct=30)
+        yield p.html()
+        await asyncio.sleep(0.5)
+        p.finish("数字孪生控制系统：监控已启动", pct=100)
+        yield p.html()
+        yield f"__MONITORING:start:{oven_id}__"
+        yield _agent_message(
+            "数字孪生控制系统",
+            f"{oven_id}号焦炉数字孪生监控已启动。后台实时监测焦化温度与压力，监控画面已在右侧面板开启。",
+            [{"label": "关闭监控", "action": "__AGENT:stop_monitoring__", "style": "default"}],
+        )
+
+    elif command == "__AGENT:stop_monitoring__":
+        yield "__MONITORING:stop__"
+        yield _agent_message("数字孪生控制系统", "监控已关闭。")
+        state.clear(session_id)
 
     else:
         yield "未知的操作指令，请重新提问。"
@@ -1261,8 +1520,8 @@ async def _data_management(question: str, session_id: str, p: ProgressTracker):
             # 下载链接
             download_html = (
                 '\n\n<a href="http://127.0.0.1:8000/download_coals/" target="_blank" '
-                'style="display:inline-block;padding:8px 16px;background:#1F2937;color:#38BDF8;'
-                'border-radius:8px;text-decoration:none;font-size:13px;border:1px solid #334155;">'
+                'style="display:inline-block;padding:8px 16px;background:#F1F5F9;color:#2563EB;'
+                'border-radius:8px;text-decoration:none;font-size:13px;border:1px solid #CBD5E1;">'
                 '📥 下载完整煤样数据 (Excel)</a>\n\n'
             )
             logger.info(f"输出下载链接，长度: {len(download_html)}")

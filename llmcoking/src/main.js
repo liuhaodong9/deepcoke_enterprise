@@ -16,6 +16,9 @@ const http = axios.create({
 Vue.prototype.$http = http
 // =====================================================================
 
+// 全局事件总线（用于跨组件通信：聊天 → 数据面板）
+Vue.prototype.$eventBus = new Vue()
+
 Vue.config.productionTip = false
 
 Vue.use(VueParticles)

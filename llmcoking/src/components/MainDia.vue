@@ -411,7 +411,11 @@ export default {
         '__AGENT:confirm_delete_coal__': '确认删除',
         '__AGENT:confirm_update_coal__': '确认更新',
         '__AGENT:cancel_data__': '取消操作',
-        '__AGENT:use_all_coals__': '用全部煤种优化'
+        '__AGENT:use_all_coals__': '用全部煤种优化',
+        '__AGENT:price_to_blend__': '根据煤仓制定配煤方案',
+        '__AGENT:load_oven__': '填入焦炉',
+        '__AGENT:start_monitoring__': '开启数字孪生监控',
+        '__AGENT:stop_monitoring__': '关闭监控'
       }
       let displayText = userText
       if (userText.startsWith('__AGENT:')) {
@@ -432,8 +436,8 @@ export default {
       this.messages.push(botMessage)
       this.scrollToBottom()
 
-      let sessionToUse = this.sessionId
-      if (this.sessionId === 'new') {
+      let sessionToUse = this.localSessionId || this.sessionId
+      if (sessionToUse === 'new') {
         try {
           const response = await fetch(`${this.apiBaseUrl}/new_session/?user_id=user123`, { method: 'POST' })
           const data = await response.json()
@@ -483,6 +487,20 @@ export default {
           const { value, done } = await reader.read()
           if (done) break
           buffer += decoder.decode(value, { stream: true })
+
+          // 解析视频控制标记 __VIDEO:xxx__
+          const videoMatch = buffer.match(/__VIDEO:(\w+)__/)
+          if (videoMatch) {
+            this.$eventBus.$emit('video-control', videoMatch[1])
+            buffer = buffer.replace(videoMatch[0], '')
+          }
+
+          // 解析数字孪生监控标记 __MONITORING:start:xxx__ 或 __MONITORING:stop__
+          const monMatch = buffer.match(/__MONITORING:(start|stop)(?::(\w+))?__/)
+          if (monMatch) {
+            this.$eventBus.$emit('monitoring-control', { action: monMatch[1], ovenId: monMatch[2] || null })
+            buffer = buffer.replace(monMatch[0], '')
+          }
 
           // 按 __PG__ / __/PG__ 标记分割进度块和正文
           while (true) {
@@ -643,15 +661,15 @@ export default {
 /* ===== 整体布局 ===== */
 .chat-outer {
   display: flex;
-  height: 100vh;
+  height: 100%;
   width: 100%;
   overflow: hidden;
 }
 .chat-wrapper {
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background: #0C0F14;
+  height: 100%;
+  background: #FFFFFF;
   flex: 1;
   min-width: 0;
   transition: flex 0.3s ease;
@@ -666,27 +684,27 @@ export default {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #111827;
-  border-left: 2px solid #1e293b;
+  background: #FAFBFC;
+  border-left: 2px solid #E2E8F0;
 }
 .pdf-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 10px 16px;
-  background: #1f2937;
-  border-bottom: 1px solid #374151;
+  background: #F1F5F9;
+  border-bottom: 1px solid #E2E8F0;
   flex-shrink: 0;
 }
 .pdf-panel-title {
-  color: #93c5fd;
+  color: #1E40AF;
   font-size: 14px;
   font-weight: 600;
 }
 .pdf-panel-close {
-  background: #374151;
-  border: 1px solid #4b5563;
-  color: #e5e7eb;
+  background: #E2E8F0;
+  border: 1px solid #CBD5E1;
+  color: #475569;
   width: 28px;
   height: 28px;
   border-radius: 6px;
@@ -700,6 +718,7 @@ export default {
 .pdf-panel-close:hover {
   background: #ef4444;
   border-color: #ef4444;
+  color: #FFFFFF;
 }
 .pdf-panel-iframe {
   flex: 1;
@@ -711,7 +730,7 @@ export default {
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
-  padding-top: 56px;
+  padding-top: 12px;
 }
 
 .chat-scroll::-webkit-scrollbar {
@@ -719,12 +738,12 @@ export default {
 }
 
 .chat-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(0, 0, 0, 0.1);
   border-radius: 3px;
 }
 
 .chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .chat-content {
@@ -745,12 +764,12 @@ export default {
   width: 56px;
   height: 56px;
   border-radius: 14px;
-  background: #F1F5F9;
+  background: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 20px;
-  box-shadow: 0 8px 24px rgba(255, 255, 255, 0.06);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 .welcome-logo img {
@@ -762,7 +781,7 @@ export default {
 .welcome-title {
   font-family: 'Noto Sans SC', sans-serif;
   font-size: 17px;
-  color: #94A3B8;
+  color: #475569;
   font-weight: 400;
   margin: 0 0 28px;
   text-align: center;
@@ -781,16 +800,16 @@ export default {
   align-items: flex-start;
   gap: 12px;
   padding: 14px 16px;
-  background: #161A22;
-  border: 1px solid #1F2937;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
   border-radius: 10px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .quick-item:hover {
-  background: #1A1F28;
-  border-color: #374151;
+  background: #F1F5F9;
+  border-color: #CBD5E1;
 }
 
 .quick-icon {
@@ -808,14 +827,14 @@ export default {
 .quick-main {
   font-family: 'Noto Sans SC', sans-serif;
   font-size: 13px;
-  color: #F1F5F9;
+  color: #1E293B;
   font-weight: 500;
 }
 
 .quick-sub {
   font-family: 'Noto Sans SC', sans-serif;
   font-size: 12px;
-  color: #64748B;
+  color: #94A3B8;
 }
 
 /* ===== 消息行 ===== */
@@ -840,7 +859,7 @@ export default {
 }
 
 .bot-avatar {
-  background: #F1F5F9;
+  background: #FFFFFF;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -863,19 +882,19 @@ export default {
 }
 
 .message-row.bot .message-bubble {
-  color: #E2E8F0;
+  color: #334155;
   padding: 14px 18px;
-  background: #161A22;
-  border: 1px solid #1F2937;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
   border-radius: 4px 18px 18px 18px;
 }
 
 .message-row.user .message-bubble {
-  background: rgba(255, 255, 255, 0.06);
+  background: #1E293B;
   color: #F1F5F9;
   padding: 12px 18px;
   border-radius: 18px 18px 4px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid #334155;
 }
 
 /* ===== Markdown 内容样式（ChatGPT 风格） ===== */
@@ -885,23 +904,23 @@ export default {
 ::v-deep .message-bubble h1 {
   font-size: 20px;
   font-weight: 700;
-  color: #F1F5F9;
+  color: #1E293B;
   margin: 24px 0 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #1F2937;
+  border-bottom: 1px solid #E2E8F0;
 }
 ::v-deep .message-bubble h2 {
   font-size: 17px;
   font-weight: 600;
-  color: #F1F5F9;
+  color: #1E293B;
   margin: 20px 0 10px;
   padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid #F1F5F9;
 }
 ::v-deep .message-bubble h3 {
   font-size: 15px;
   font-weight: 600;
-  color: #E2E8F0;
+  color: #334155;
   margin: 16px 0 8px;
 }
 ::v-deep .message-bubble h1:first-child,
@@ -929,29 +948,29 @@ export default {
 
 /* 粗体 / 强调 */
 ::v-deep .message-bubble strong {
-  color: #F8FAFC;
+  color: #1E293B;
   font-weight: 600;
 }
 ::v-deep .message-bubble em {
-  color: #CBD5E1;
+  color: #475569;
   font-style: italic;
 }
 
 /* 行内代码 */
 ::v-deep .message-bubble code {
-  background: rgba(56, 189, 248, 0.08);
+  background: rgba(37, 99, 235, 0.06);
   padding: 2px 6px;
   border-radius: 4px;
   font-size: 13px;
   font-family: 'JetBrains Mono', monospace;
-  color: #38BDF8;
-  border: 1px solid rgba(56, 189, 248, 0.12);
+  color: #2563EB;
+  border: 1px solid rgba(37, 99, 235, 0.12);
 }
 
 /* 代码块 */
 ::v-deep .message-bubble pre {
-  background: #0D1117;
-  border: 1px solid #1F2937;
+  background: #1E293B;
+  border: 1px solid #334155;
   border-radius: 10px;
   padding: 16px;
   margin: 12px 0;
@@ -960,7 +979,7 @@ export default {
 ::v-deep .message-bubble pre code {
   background: transparent;
   padding: 0;
-  color: #CBD5E1;
+  color: #E2E8F0;
   border: none;
   font-size: 13px;
   line-height: 1.6;
@@ -968,13 +987,13 @@ export default {
 
 /* 链接 */
 ::v-deep .message-bubble a {
-  color: #38BDF8;
+  color: #2563EB;
   text-decoration: none;
-  border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+  border-bottom: 1px solid rgba(37, 99, 235, 0.3);
   transition: border-color 0.2s;
 }
 ::v-deep .message-bubble a:hover {
-  border-bottom-color: #38BDF8;
+  border-bottom-color: #2563EB;
 }
 
 /* 表格 */
@@ -985,16 +1004,16 @@ export default {
   width: 100%;
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #1F2937;
+  border: 1px solid #E2E8F0;
   font-size: 14px;
 }
 ::v-deep .message-bubble th {
-  background: rgba(56, 189, 248, 0.06);
-  color: #E2E8F0;
+  background: #F1F5F9;
+  color: #1E293B;
   font-weight: 600;
   padding: 10px 14px;
   text-align: left;
-  border-bottom: 1px solid #1F2937;
+  border-bottom: 1px solid #E2E8F0;
   font-size: 13px;
   text-transform: none;
   letter-spacing: 0.02em;
@@ -1002,24 +1021,24 @@ export default {
 ::v-deep .message-bubble td {
   padding: 9px 14px;
   text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  color: #CBD5E1;
+  border-bottom: 1px solid #F1F5F9;
+  color: #475569;
 }
 ::v-deep .message-bubble tr:last-child td {
   border-bottom: none;
 }
 ::v-deep .message-bubble tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(0, 0, 0, 0.02);
 }
 
 /* 引用块 */
 ::v-deep .message-bubble blockquote {
   margin: 12px 0;
   padding: 10px 16px;
-  border-left: 3px solid #38BDF8;
-  background: rgba(56, 189, 248, 0.04);
+  border-left: 3px solid #2563EB;
+  background: rgba(37, 99, 235, 0.04);
   border-radius: 0 8px 8px 0;
-  color: #94A3B8;
+  color: #64748B;
   font-size: 14px;
 }
 ::v-deep .message-bubble blockquote p {
@@ -1030,7 +1049,7 @@ export default {
 ::v-deep .message-bubble hr {
   border: none;
   height: 1px;
-  background: linear-gradient(90deg, transparent, #334155, transparent);
+  background: linear-gradient(90deg, transparent, #CBD5E1, transparent);
   margin: 20px 0;
 }
 
@@ -1043,30 +1062,30 @@ export default {
 
 /* ===== 推理过程折叠块 ===== */
 ::v-deep .message-bubble details {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid #1F2937;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
   border-radius: 8px;
   padding: 10px 14px;
   margin: 8px 0 12px;
 }
 ::v-deep .message-bubble details summary {
   cursor: pointer;
-  color: #94A3B8;
+  color: #64748B;
   font-size: 14px;
   user-select: none;
 }
 ::v-deep .message-bubble details summary:hover {
-  color: #F1F5F9;
+  color: #1E293B;
 }
 ::v-deep .message-bubble details[open] summary {
   margin-bottom: 8px;
-  border-bottom: 1px solid #1F2937;
+  border-bottom: 1px solid #E2E8F0;
   padding-bottom: 6px;
 }
 ::v-deep .message-bubble details p,
 ::v-deep .message-bubble details li {
   font-size: 13px;
-  color: #94A3B8;
+  color: #64748B;
 }
 
 /* ===== 加载动画 ===== */
@@ -1080,7 +1099,7 @@ export default {
 
 .loading-text {
   font-size: 13px;
-  color: #94A3B8;
+  color: #64748B;
   animation: pulse-text 2s infinite ease-in-out;
 }
 
@@ -1099,7 +1118,7 @@ export default {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #94A3B8;
+  background: #94A3B8;  /* 中性灰，浅色主题也适用 */
   animation: dots 1.4s infinite ease-in-out;
 }
 
@@ -1118,7 +1137,7 @@ export default {
   user-select: none;
   margin-bottom: 8px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid #E2E8F0;
 }
 
 .thinking-header {
@@ -1126,17 +1145,17 @@ export default {
   align-items: center;
   gap: 8px;
   font-size: 14px;
-  color: #94A3B8;
+  color: #64748B;
   transition: color 0.2s;
 }
 
 .thinking-header:hover {
-  color: #CBD5E1;
+  color: #1E293B;
 }
 
 .thinking-spinner {
   animation: think-spin 1s linear infinite;
-  color: #38BDF8;
+  color: #2563EB;
   flex-shrink: 0;
 }
 
@@ -1145,7 +1164,7 @@ export default {
 }
 
 .thinking-done-icon {
-  color: #38BDF8;
+  color: #2563EB;
   flex-shrink: 0;
 }
 
@@ -1174,11 +1193,11 @@ export default {
 .thinking-content {
   margin-top: 10px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid #1F2937;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
   border-radius: 8px;
   font-size: 13px;
-  color: #94A3B8;
+  color: #64748B;
   max-height: 300px;
   overflow-y: auto;
 }
@@ -1188,7 +1207,7 @@ export default {
 }
 
 .thinking-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.1);
   border-radius: 2px;
 }
 
@@ -1206,16 +1225,17 @@ export default {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  background: #161A22;
-  border: 1px solid #1F2937;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
   border-radius: 12px;
   padding: 8px 8px 8px 4px;
   transition: border-color 0.2s;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .input-wrapper:focus-within {
-  border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.04);
+  border-color: #93C5FD;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
 }
 
 /* ===== 输入框 ===== */
@@ -1234,11 +1254,11 @@ export default {
   font-size: 15px;
   line-height: 1.5;
   background: transparent !important;
-  color: #F1F5F9;
+  color: #1E293B;
 }
 
 ::v-deep .el-textarea__inner::placeholder {
-  color: #64748B;
+  color: #94A3B8;
 }
 
 ::v-deep .el-textarea__inner:focus {
@@ -1263,8 +1283,8 @@ export default {
 }
 
 .input-icon-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #94A3B8;
+  background: rgba(0, 0, 0, 0.04);
+  color: #475569;
 }
 
 /* ===== 发送按钮 ===== */
@@ -1273,8 +1293,8 @@ export default {
   height: 34px;
   border: none;
   border-radius: 50%;
-  background: #1F2937;
-  color: #64748B;
+  background: #E2E8F0;
+  color: #94A3B8;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1284,14 +1304,14 @@ export default {
 }
 
 .send-btn.has-text {
-  background: #F1F5F9;
-  color: #0C0F14;
+  background: #1E293B;
+  color: #FFFFFF;
   cursor: pointer;
 }
 
 .send-btn.has-text:hover {
-  background: #FFFFFF;
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+  background: #0F172A;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 /* ===== 底部提示 ===== */
@@ -1309,9 +1329,9 @@ export default {
 .echart-btn {
   display: inline-block;
   padding: 8px 16px;
-  background: #1F2937;
-  color: #38BDF8;
-  border: 1px solid #334155;
+  background: #F1F5F9;
+  color: #2563EB;
+  border: 1px solid #CBD5E1;
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
@@ -1320,21 +1340,21 @@ export default {
   font-family: inherit;
 }
 .echart-btn:hover {
-  background: #334155;
+  background: #E2E8F0;
 }
 
 /* 参考文献链接 */
 .ref-link {
-  color: #38BDF8 !important;
+  color: #2563EB !important;
   text-decoration: none !important;
-  border-bottom: 1px dashed rgba(56, 189, 248, 0.4);
+  border-bottom: 1px dashed rgba(37, 99, 235, 0.4);
   transition: all 0.2s;
   cursor: pointer;
 }
 .ref-link:hover {
-  color: #7DD3FC !important;
-  border-bottom-color: #38BDF8;
-  background: rgba(56, 189, 248, 0.06);
+  color: #1D4ED8 !important;
+  border-bottom-color: #2563EB;
+  background: rgba(37, 99, 235, 0.06);
   border-radius: 2px;
   padding: 0 2px;
 }
@@ -1346,7 +1366,7 @@ export default {
 
 /* 正文中的内联引用标注 [N] */
 .inline-cite {
-  color: #38BDF8;
+  color: #2563EB;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.85em;
@@ -1357,14 +1377,14 @@ export default {
   border-radius: 2px;
 }
 .inline-cite:hover {
-  color: #7DD3FC;
-  background: rgba(56, 189, 248, 0.12);
+  color: #1D4ED8;
+  background: rgba(37, 99, 235, 0.08);
 }
 
 /* 进度条样式（不能 scoped，因为是 v-html 注入） */
 .pipeline-progress {
-  background: #111318;
-  border: 1px solid #1F2937;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
   border-radius: 10px;
   padding: 14px 16px 12px;
   margin-bottom: 8px;
@@ -1373,7 +1393,7 @@ export default {
 }
 
 .progress-step {
-  color: #94A3B8;
+  color: #64748B;
   padding: 3px 0;
   line-height: 1.6;
 }
@@ -1381,14 +1401,14 @@ export default {
 .progress-bar-wrap {
   margin-top: 10px;
   height: 4px;
-  background: #1F2937;
+  background: #E2E8F0;
   border-radius: 2px;
   overflow: hidden;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: linear-gradient(90deg, #94A3B8, #CBD5E1);
+  background: linear-gradient(90deg, #94A3B8, #64748B);
   border-radius: 2px;
   transition: width 0.4s ease;
 }
@@ -1422,19 +1442,19 @@ export default {
 
 .agent-details summary {
   cursor: pointer;
-  color: #64748B;
+  color: #94A3B8;
   font-size: 12px;
   user-select: none;
   padding: 2px 0;
 }
 
 .agent-details summary:hover {
-  color: #F1F5F9;
+  color: #1E293B;
 }
 
 .agent-details-content {
-  background: rgba(255, 255, 255, 0.02);
-  border-left: 2px solid #374151;
+  background: #FFFFFF;
+  border-left: 2px solid #CBD5E1;
   padding: 8px 12px;
   margin-top: 4px;
   font-size: 12px;
@@ -1448,23 +1468,23 @@ export default {
 }
 
 .agent-detail-item .agent-name {
-  color: #F1F5F9;
+  color: #1E293B;
   font-weight: 600;
 }
 
 .agent-detail-item .tool-call {
-  color: #A78BFA;
+  color: #7C3AED;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
 }
 
 .agent-detail-item .tool-result {
-  color: #34D399;
+  color: #059669;
   font-size: 11px;
 }
 
 .agent-detail-item .agent-decision {
-  color: #94A3B8;
+  color: #64748B;
   font-style: italic;
 }
 
@@ -1475,7 +1495,7 @@ export default {
   gap: 8px;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid #1F2937;
+  border-top: 1px solid #E2E8F0;
 }
 
 .agent-btn {
@@ -1486,27 +1506,27 @@ export default {
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
-  border: 1px solid #374151;
-  background: rgba(255, 255, 255, 0.04);
-  color: #CBD5E1;
+  border: 1px solid #CBD5E1;
+  background: #FFFFFF;
+  color: #475569;
 }
 
 .agent-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #4B5563;
-  color: #F1F5F9;
+  background: #F1F5F9;
+  border-color: #94A3B8;
+  color: #1E293B;
 }
 
 .agent-btn-primary {
-  background: #F1F5F9;
-  color: #0C0F14;
-  border-color: #F1F5F9;
+  background: #1E293B;
+  color: #FFFFFF;
+  border-color: #1E293B;
   font-weight: 600;
 }
 
 .agent-btn-primary:hover {
-  background: #FFFFFF;
-  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.1);
+  background: #0F172A;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .agent-btn:disabled {
@@ -1519,11 +1539,11 @@ export default {
   position: absolute;
   z-index: 9999;
   max-width: 380px;
-  background: #1e293b;
-  border: 1px solid #334155;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
   border-radius: 10px;
   padding: 12px 14px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
   pointer-events: none;
   animation: tooltipFadeIn 0.15s ease-out;
 }
@@ -1533,13 +1553,13 @@ export default {
 }
 .cite-tooltip-title {
   font-size: 12px;
-  color: #60a5fa;
+  color: #2563EB;
   font-weight: 600;
   margin-bottom: 6px;
 }
 .cite-tooltip-text {
   font-size: 13px;
-  color: #cbd5e1;
+  color: #475569;
   line-height: 1.6;
   word-break: break-word;
 }
